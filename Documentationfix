@@ -1,0 +1,576 @@
+# Typing Test Project Master Documentation
+
+Last Updated: 2026-05-14
+Owner: Project Team
+Applies To: Entire project under C:\wamp64\www\typing
+
+------------------------------------------------------------
+1) Purpose Of This File
+------------------------------------------------------------
+This is the single source of truth for project understanding, setup, architecture, flows, database, APIs, diagnostics, and change history.
+
+Rule for all future work:
+- Every project change must be documented in this same file.
+- Do not create new documentation files unless absolutely required.
+- Update Last Updated date and append a new change log entry.
+
+------------------------------------------------------------
+2) Project Overview
+------------------------------------------------------------
+Project Type:
+- Typing Test system built with PHP backend and Vue.js frontend.
+
+Core Modules:
+- Candidate Portal: login and typing exam in index.html.
+- Admin Dashboard: center, candidates, sessions, analytics, results, settings, and center incharge assignment in admin/index.html.
+- Center Incharge Portal: restricted center dashboard in center/index.html.
+- API Layer: PHP endpoints in api_backend, api_backend/admin, and api_backend/center.
+- Database: MySQL database typing_local.
+
+Primary Goal:
+- Conduct center-wise typing tests with session-password-based login and one-attempt controls.
+
+------------------------------------------------------------
+3) Folder And File Map
+------------------------------------------------------------
+Root:
+- index.html: Candidate login + typing test SPA (Vue Router history mode).
+- verify_login.html: Browser-based API and login verification utility.
+- test_login.php: Comprehensive server-side diagnostic page.
+- setup_database.sql: Baseline schema creation.
+- update_database.sql: Schema migration/update script.
+- quick_test_data.sql: Sample centers, session, and candidates.
+- reset_users.sql: Reset tested/logged flags for retest cycles.
+- import users.csv: Candidate import sample source.
+
+Backend:
+- api_backend/mysqli.php: DB connection bootstrap.
+- api_backend/login.php: Candidate login API.
+- api_backend/get_paragraph.php: Active paragraph API.
+- api_backend/save_result.php: Save result API.
+- api_backend/config.php: Public app settings API (default test duration).
+- api_backend/test_direct.php: Direct backend verification script.
+
+Admin Backend:
+- api_backend/admin/admin_login.php: Admin authentication API.
+- api_backend/admin/api.php: Admin CRUD, analytics, settings, and incharge management actions.
+
+Center Incharge Backend:
+- api_backend/center/login.php: Center incharge authentication API.
+- api_backend/center/api.php: Restricted center data API via session.
+
+Admin Frontend:
+- admin/index.html: Dashboard UI for admins.
+
+Center Incharge Frontend:
+- center/index.html: Center-limited dashboard for incharges.
+
+------------------------------------------------------------
+4) End-To-End Functional Flow
+------------------------------------------------------------
+4.1 Candidate Flow
+1. Candidate opens /typing/.
+2. Candidate enters CNIC, Roll Number, and Lab Session Password.
+3. Frontend calls POST /typing/api_backend/login.php.
+4. Backend validates:
+   - Active session password for today in lab_sessions.
+   - Candidate in users with matching cnic, roll_no, center_id, type=1.
+   - Status checks: already tested or already logged in.
+5. Backend marks candidate logged in and records live_candidates row.
+6. Frontend stores user data in localStorage key _td and routes to typing-test view.
+7. Frontend loads paragraph from /typing/api_backend/get_paragraph.php.
+8. Candidate types; WPM/accuracy computed client-side.
+9. On completion, frontend posts result to /typing/api_backend/save_result.php.
+10. Backend inserts results, marks user tested=1, and closes live session record.
+
+4.2 Admin Flow
+1. Admin opens /typing/admin/.
+2. Admin login POST to api_backend/admin/admin_login.php.
+3. Dashboard loads centers, analytics, sessions, app settings, and incharges.
+4. Admin can:
+   - Manage centers.
+   - Add/import/reset/delete candidates.
+   - Create/expire lab sessions.
+   - Manage paragraphs.
+   - Set default test duration in minutes.
+   - Create center incharge logins and assign their center.
+   - View analytics and results.
+
+4.3 Center Incharge Flow
+1. Incharge opens /typing/center/.
+2. Incharge logs in via api_backend/center/login.php.
+3. Session stores assigned center id.
+4. Incharge dashboard loads from api_backend/center/api.php?action=dashboard.
+5. Incharge sees only center-limited candidates, sessions, and results.
+
+------------------------------------------------------------
+5) Database Details
+------------------------------------------------------------
+Database Name:
+- typing_local
+
+Connection:
+- Host: localhost
+- User: root
+- Password: empty in current local setup
+- Config file: api_backend/mysqli.php
+
+5.1 Core Tables And Key Columns
+
+admins:
+- id (PK)
+- username (unique)
+- password (MD5 hash currently)
+- full_name
+- is_active
+
+centers:
+- id (PK)
+- name
+- code (unique)
+- created_at
+
+users:
+- id (PK)
+- name
+- cnic
+- roll_no
+- center_id
+- type (1 for candidate)
+- tested
+- logged_once
+- allow_retest
+- last_login
+- created_at
+
+lab_sessions:
+- id (PK)
+- center_id
+- session_password
+- status (active/expired)
+- created_at
+
+paragraphs:
+- id (PK)
+- title
+- content
+- is_active
+- created_at
+
+results:
+- id (PK)
+- uid (user id)
+- roll_no
+- center_id
+- characters_typed
+- correct_words
+- incorrect_words
+- wpm
+- accuracy
+- time
+- date
+
+live_candidates:
+- id (PK)
+- user_id
+- session_id
+- center_id
+- started_at
+- finished_at
+
+app_settings:
+- skey (PK)
+- svalue
+- updated_at
+
+center_incharges:
+- id (PK)
+- center_id
+- username (unique)
+- password (password_hash recommended)
+- full_name
+- is_active
+- created_at
+
+5.2 Relationship Intent
+- users.center_id -> centers.id
+- lab_sessions.center_id -> centers.id
+- results.uid -> users.id
+- results.center_id -> centers.id
+- live_candidates.user_id -> users.id
+- live_candidates.center_id -> centers.id
+
+Note:
+- Foreign keys are mostly logical (application-enforced), not strictly constrained in current scripts.
+
+------------------------------------------------------------
+6) API Details
+------------------------------------------------------------
+6.1 Candidate APIs
+
+GET /typing/api_backend/config.php
+Output:
+- default_test_minutes
+Behavior:
+- Returns globally configured default test duration (fallback 1 minute).
+
+POST /typing/api_backend/login.php
+Input JSON:
+- cnic
+- rollno
+- otp
+
+Output status values:
+- ok
+- invalid_password
+- notfound
+- already_tested
+- already_logged
+
+Important behavior:
+- Validates active session for current date only.
+- Validates candidate center against session center.
+- Sets logged_once=1 and updates last_login if column exists.
+- Adds/updates live_candidates record.
+
+GET /typing/api_backend/get_paragraph.php
+Output:
+- content
+- title (if found)
+Behavior:
+- Returns random active paragraph.
+- Falls back to default hardcoded text if no active paragraph found.
+
+POST /typing/api_backend/save_result.php
+Input JSON:
+- result object (uid, roll_no, center_id, total_words_typed, correct_words, incorrect_words, wpm, accuracy, time)
+Behavior:
+- Inserts into results.
+- Updates users.tested=1.
+- Sets live_candidates.finished_at for active record.
+
+6.2 Admin APIs
+
+POST /typing/api_backend/admin/admin_login.php
+Input:
+- username
+- password
+Output:
+- status: ok/fail
+- admin object on success
+Security behavior:
+- Regenerates PHP session ID on successful login.
+- Enforces strict cookie session mode (HttpOnly + SameSite=Strict; Secure on HTTPS).
+
+GET/POST /typing/api_backend/admin/api.php?action=...
+Read-only actions:
+- me
+- audit_security
+- get_settings
+- get_centers
+- get_type_codes
+- get_incharges
+- get_candidates
+- get_center_change_logs
+- get_paragraphs
+- get_sessions
+- get_analytics
+- get_results
+- get_result_card
+
+State-changing actions (POST only, return 405 on GET):
+- logout
+- sync_production
+- update_settings
+- add_center
+- add_type_code
+- delete_type_code
+- add_incharge
+- assign_incharge_center
+- toggle_incharge
+- add_candidate
+- import_candidates
+- reset_candidate
+- allow_retest
+- delete_candidate
+- change_candidate_type
+- change_candidate_center
+- add_paragraph
+- delete_paragraph
+- create_session
+- expire_session
+
+Actions:
+- get_settings
+- update_settings
+- get_centers
+- add_center
+- get_incharges
+- add_incharge
+- assign_incharge_center
+- toggle_incharge
+- get_candidates
+- add_candidate
+- import_candidates
+- reset_candidate
+- allow_retest
+- delete_candidate
+- get_paragraphs
+- add_paragraph
+- delete_paragraph
+- get_sessions
+- create_session
+- expire_session
+- get_analytics
+- get_results
+
+6.3 Center Incharge APIs
+
+POST /typing/api_backend/center/login.php
+Input:
+- username
+- password
+Output:
+- status: ok/fail
+- incharge object on success
+
+GET /typing/api_backend/center/api.php?action=dashboard
+Behavior:
+- Returns center-limited stats, candidates, sessions, and results only for assigned center.
+
+GET /typing/api_backend/center/api.php?action=logout
+Behavior:
+- Clears center incharge session.
+
+------------------------------------------------------------
+7) Frontend And Routing Notes
+------------------------------------------------------------
+Candidate app in index.html uses:
+- base href /typing/
+- Vue Router history mode
+
+Critical rule:
+- API calls must use absolute paths beginning with /typing/api_backend/...
+Using relative paths can break when router path changes.
+
+------------------------------------------------------------
+8) Diagnostics And Verification
+------------------------------------------------------------
+Primary verification pages:
+- /typing/verify_login.html
+- /typing/test_login.php
+- /typing/api_backend/test_direct.php
+
+What these verify:
+- DB connectivity
+- Required tables
+- Active lab sessions
+- Candidate record availability
+- API reachability
+- End-to-end login readiness
+
+------------------------------------------------------------
+9) Known Fixes Applied
+------------------------------------------------------------
+1. Backend include path fixes:
+- Corrected require paths to mysqli.php in candidate and admin API files.
+
+2. Frontend API path fixes:
+- Changed candidate API calls from relative to absolute /typing/api_backend/... paths.
+
+3. Candidate center integration:
+- Added/ensured center_id usage for users/session matching and candidate page functionality.
+
+4. Last login schema mismatch fix:
+- Issue: login failed with server error because users.last_login did not exist in current DB.
+- Fix in runtime: login.php now checks if last_login column exists and falls back safely.
+- Fix in migration: update_database.sql now adds last_login if missing.
+
+------------------------------------------------------------
+10) Setup And Initialization
+------------------------------------------------------------
+Recommended order on fresh or repaired environment:
+1. Create database typing_local.
+2. Run setup_database.sql.
+3. Run update_database.sql.
+4. Run quick_test_data.sql (for test environment).
+5. Validate using verify_login.html and test_login.php.
+
+Default local test credentials:
+- Candidate: CNIC 1234567890123, Roll ROLL001, Password TEST123
+- Admin: username admin, password admin123
+
+------------------------------------------------------------
+11) Common Problems And Fast Checks
+------------------------------------------------------------
+Problem: Server error on candidate login
+Checks:
+- Check php error logs in C:\wamp64\logs\php_error.log.
+- Confirm users table has required columns (especially center_id and last_login).
+- Verify session exists for today and is active.
+
+Problem: Invalid session password
+Checks:
+- Ensure active row in lab_sessions for current date.
+- Ensure status is active.
+
+Problem: Candidate not found
+Checks:
+- CNIC and roll_no exact match.
+- Candidate type=1.
+- Candidate center_id matches session center_id.
+
+Problem: Candidate blocked as already logged/tested
+Fix options:
+- reset_users.sql for bulk reset
+- admin reset candidate action
+
+Problem: Candidate import mismatch
+Warning:
+- CSV imported from spreadsheets can convert CNIC to scientific notation.
+- Always validate CNIC as plain 13-digit text after import.
+
+------------------------------------------------------------
+12) Security Notes
+------------------------------------------------------------
+Current state:
+- Admin auth supports password_hash and legacy MD5.
+- Admin login now regenerates session id on success to reduce session fixation risk.
+- Admin API now enforces POST-only for state-changing actions, reducing CSRF surface on GET endpoints.
+- Admin session cookies are hardened with strict mode, HttpOnly, and SameSite=Strict (Secure on HTTPS).
+- Center incharge auth supports password_hash and legacy MD5 fallback.
+- Candidate APIs include basic security headers (nosniff, frame, referrer policy).
+- Candidate side disables common browser shortcuts/context menu and blocks refresh keys during active test.
+
+Recommended future improvements:
+- Migrate all remaining admin passwords to password_hash only.
+- Add server-side rate limiting for login.
+- Add explicit CSRF token validation for admin and center mutation requests (defense in depth).
+- Replace wildcard CORS with restricted origin policy if needed.
+- Add prepared statements for all dynamic SQL queries.
+
+------------------------------------------------------------
+13) How To Update This File After Any Change
+------------------------------------------------------------
+For every future update, add one entry in section 14 with:
+- Date
+- Change summary
+- Files changed
+- DB changes (if any)
+- Validation performed
+
+Also revise impacted sections above (flow, API, DB, troubleshooting).
+
+------------------------------------------------------------
+14) Change Log
+------------------------------------------------------------
+2026-04-09
+- Consolidated all previous markdown docs into this single master file.
+- Documented complete candidate and admin flow.
+- Documented full DB schema expectations and key relationships.
+- Documented candidate/admin API contract and statuses.
+- Included diagnostics, setup, troubleshooting, and maintenance policy.
+
+2026-04-09
+- Fixed candidate login runtime failure when users.last_login column was missing.
+- login.php updated to check column existence and fallback update logic.
+- update_database.sql updated to add last_login when absent.
+- Validation: endpoint POST returned status ok for live credentials.
+
+2026-04-09
+- Fixed refresh/cache behavior so direct login URL load does not auto-redirect into typing test from stale local state.
+- Implemented configurable default test duration (default 1 minute) via app_settings + admin settings UI + config endpoint.
+- Implemented standard realtime WPM formulas: Gross WPM = total chars/5 per elapsed minute, Net WPM = correct chars/5 per elapsed minute.
+- Added realtime display for net/gross WPM and correct/incorrect word counts in candidate test UI.
+- Implemented test completion on timeout OR when all words are typed; result page and save flow now trigger for both.
+- Strengthened active-test refresh/close prevention using beforeunload and refresh key blocking.
+- Added center incharge architecture: DB table, admin CRUD/assignment, center-restricted login API, and center portal UI.
+- Added basic hardening headers and request validation in major APIs.
+- Validation: php -l passed for all modified backend endpoints.
+
+2026-04-09
+- Rebranded candidate, admin, and center portals from BISE branding to ETEA and applied shared logo.png usage across login and header areas.
+- Standardized branding logo sizes and spacing across all portals for visual consistency.
+- Added locked-candidate visibility in admin and center candidate lists (Locked Incomplete vs In Progress) based on live attempt state.
+- Added center incharge candidate unlock action for locked incomplete candidates.
+- Added immediate center incharge session list refresh after generating a new lab password.
+- Added search and pagination in candidate/results pages for both admin and center portals.
+- Added center-change workflow for candidates in both portals with mandatory reason and backend history logging.
+- Added DB table candidate_center_change_logs and APIs for center change + log retrieval.
+- Updated candidate result card to remove Gross WPM tile and keep Net speed-focused summary.
+- Updated candidate live test header to show Net WPM only and removed the live-test badge from the top bar.
+- Removed center change controls from the center incharge portal so only admin retains that action.
+- Added candidate post display in admin and center lists, plus candidate type and typed paragraph assignment support.
+- Candidate type now drives paragraph selection, and the center incharge portal no longer exposes center change; that remains admin-only.
+- Updated test screen to remove duplicate top stats strip and center-align typing input text.
+- Replaced browser prompt/alert/confirm usage in admin and center portals with in-app modal and toast interactions for consistent UX.
+- Prepared a clean production bundle under `production/` with runtime-only files and a hardened `.htaccess` for online deployment.
+- Removed obsolete `users.otp` migration changes from the database update script.
+- Validation: php -l and frontend error checks passed for all modified files.
+
+2026-04-24
+- Added users.center_name and users.image_url support in schema/migrations, and ensured users.center_code is present/backfilled from centers.
+- Updated admin candidate import API to resolve centers by center_id, center_code, or full center_name from centers table.
+- Added import-time assignment of center_id plus synced center_code/center_name values from centers into users rows.
+- Updated add candidate and change center flows so users.center_code/users.center_name stay aligned with centers.
+- Updated admin CSV parser to support quoted fields (commas inside full center names), header-based mapping, center_name input, and image_url input.
+- Updated admin center dropdown labels to show short center code (fallback to name).
+- Added candidate image rendering in candidate logged-in UI and result card preview screens.
+- Updated candidate login API response to include resolved center_name/center_code from centers mapping.
+- Mirrored runtime updates to production copies under production/ for deployment parity.
+- Validation: php -l passed for updated api_backend/admin/api.php and api_backend/login.php in both root and production; VS Code problems check reported no errors in touched HTML/SQL/PHP files.
+
+2026-04-24
+- Added a one-click Download CSV Template action in admin candidate import screen.
+- Template now includes import-ready headers: name, cnic, roll_no, post, type, center_code, center_name, image_url.
+- Included Excel-safe quoted sample rows and UTF-8 BOM to prevent encoding issues in spreadsheet tools.
+- Mirrored the same template-download UI behavior to production/admin/index.html.
+
+2026-04-24
+- Fixed paragraph selection inconsistency after candidate reset/unlock flows.
+- get_paragraph.php now accepts uid and prefers the candidate's current users.type from DB over stale browser-provided type.
+- index.html now sends both type and uid when requesting paragraph content.
+- Mirrored same fix to production/api_backend/get_paragraph.php and production/index.html.
+
+2026-04-24
+- Reconfirmed the root/local environment uses database typing_april_12 in api_backend/mysqli.php.
+- Note: setup scripts, diagnostics, and production references still mention typing_local, so local environment-specific DB naming must be verified before applying DB config changes.
+- Validation: reviewed root DB config and restored local default connection target.
+
+2026-04-24
+- Fixed admin session restore failure for the local typing_april_12 database.
+- Root cause: api_backend/admin/api.php action=me selected admins.created_at, but the local admins table does not include that column.
+- Fix: removed created_at dependency from the admin session lookup so dashboard refresh and boot login checks work with the existing admins schema.
+- Validation: verified admins columns in typing_april_12 and reproduced successful admin_login plus authorized session-backed API access.
+
+2026-04-25
+- Conducted a full admin session security/functionality review after reconnect.
+- Fixed session fixation risk by enabling session_regenerate_id(true) on successful admin login in api_backend/admin/admin_login.php.
+- Added stricter session cookie handling in admin login/API: session strict mode, cookie-only sessions, HttpOnly, SameSite=Strict, and Secure-on-HTTPS.
+- Enforced POST-only access for all state-changing admin actions in api_backend/admin/api.php; non-POST requests now return 405.
+- Hardened create_session and other mutating actions with null-safe request parsing and explicit input validation, preventing warning leakage and invalid center_id=0 sessions.
+- Updated admin frontend request handling in admin/index.html (and production mirror):
+   - logout now uses POST
+   - global unauthorized handling in get/post wrappers clears admin state and refresh timers
+   - added defensive array guards for type/session payloads to avoid runtime crashes when API returns non-array payloads.
+- Validation performed:
+   - Unauthenticated me endpoint returns HTTP 401.
+   - Session ID rotation confirmed after successful login (pre-seeded PHPSESSID changed after login).
+   - GET logout and GET create_session now blocked with HTTP 405.
+   - POST create_session without center_id fails with clear validation message.
+   - POST create_session with valid center_id succeeds.
+   - POST logout succeeds and subsequent me returns HTTP 401.
+   - php -l passed for root and production admin backend files; no VS Code problems in root and production admin/index.html.
+
+2026-05-14
+- Removed candidate auto-lock on tab/window focus loss in index.html and production/index.html.
+- Replaced the zero-result abandon flow with a warning-only strategy so tab switches and minimize/restore events no longer auto-submit an abandoned result.
+- Added repeatable focus-loss warnings by resetting the warning flag when focus returns.
+- Declared focusWarningShown in the candidate test component data so the warning state stays reactive and stable.
+- Validation: get_errors reported no errors for root and production candidate pages.
+
+2026-05-14
+- Initialized a local git repository in C:\wamp64\www\typing and committed the documentation/code changes as a local root commit.
+- Attempted to push to GitHub repository https://github.com/yousafali-phd/typing.git.
+- HTTPS access returned "Repository not found" and SSH access returned "Permission denied (publickey)", so the push could not be completed from this machine.
+- Next action required: configure GitHub authentication or confirm the exact clone URL/owner before pushing to the remote typing branch.

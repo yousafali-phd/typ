@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Login System Verification</title>
+    <style>
+        body{font-family:Arial;padding:20px;background:#f0f2f5}
+        .container{max-width:900px;margin:0 auto}
+        h1{color:#1a237e;border-bottom:3px solid #00b0ff;padding-bottom:10px}
+        .test-box{background:white;padding:20px;margin:15px 0;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.1)}
+        .success{color:#00c853;font-weight:bold}
+        .error{color:#f44336;font-weight:bold}
+        .warning{color:#ff9100;font-weight:bold}
+        .info{color:#0066cc}
+        button{background:#1a237e;color:white;border:none;padding:12px 24px;border-radius:6px;cursor:pointer;font-size:14px;margin:5px}
+        button:hover{background:#283593}
+        pre{background:#f5f5f5;padding:10px;border-radius:4px;overflow-x:auto}
+        .status-badge{display:inline-block;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:bold}
+        .badge-pass{background:#d4edda;color:#155724}
+        .badge-fail{background:#f8d7da;color:#721c24}
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>🔍 Login System Verification & Testing</h1>
+    
+    <div class="test-box">
+        <h2>📋 Pre-Flight Checklist</h2>
+        <ol style="line-height:2">
+            <li>✅ All PHP files have correct <code>mysqli.php</code> paths</li>
+            <li>✅ All API calls use absolute paths (<code>/typing/api_backend/...</code>)</li>
+            <li>✅ Database <code>typing_local</code> exists</li>
+            <li>✅ All tables created (run <code>setup_database.sql</code>)</li>
+            <li>✅ Test data added (run <code>quick_test_data.sql</code>)</li>
+        </ol>
+    </div>
+
+    <div class="test-box">
+        <h2>🧪 Live API Tests</h2>
+        <p>Click the buttons below to test each component:</p>
+        
+        <button onclick="testDatabase()">1. Test Database Connection</button>
+        <button onclick="testSession()">2. Test Lab Session</button>
+        <button onclick="testUser()">3. Test User Data</button>
+        <button onclick="testLogin()">4. Test Full Login Flow</button>
+        <button onclick="testParagraph()">5. Test Paragraph API</button>
+        
+        <div id="test-results" style="margin-top:20px"></div>
+    </div>
+
+    <div class="test-box">
+        <h2>🔐 Manual Login Test</h2>
+        <p>Use these credentials to test the actual login page:</p>
+        <div style="background:#e3f2fd;padding:15px;border-radius:6px;border-left:4px solid #0066cc">
+            <strong>CNIC:</strong> <code style="background:white;padding:4px 8px;border-radius:3px">1234567890123</code><br>
+            <strong>Roll Number:</strong> <code style="background:white;padding:4px 8px;border-radius:3px">ROLL001</code><br>
+            <strong>Session Password:</strong> <code style="background:white;padding:4px 8px;border-radius:3px">TEST123</code>
+        </div>
+        <button onclick="window.open('/typing/', '_blank')" style="margin-top:10px">🚀 Open Login Page</button>
+    </div>
+
+    <div class="test-box">
+        <h2>📊 API Endpoints Status</h2>
+        <div id="endpoint-status">
+            <p class="info">Click "Check All Endpoints" to verify API files are accessible...</p>
+        </div>
+        <button onclick="checkEndpoints()">Check All Endpoints</button>
+    </div>
+
+    <div class="test-box">
+        <h2>🔧 Troubleshooting Tools</h2>
+        <button onclick="window.open('/typing/test_login.php', '_blank')">Open Diagnostic Tool</button>
+        <button onclick="window.open('/typing/api_backend/test_direct.php', '_blank')">Open Direct API Test</button>
+        <button onclick="resetTestUser()">Reset Test User</button>
+        <button onclick="viewLogs()">View Error Logs</button>
+    </div>
+</div>
+
+<script>
+function showResult(elementId, html) {
+    document.getElementById(elementId).innerHTML = html;
+}
+
+async function testDatabase() {
+    showResult('test-results', '<p class="info">⏳ Testing database connection...</p>');
+    try {
+        const response = await fetch('/typing/api_backend/test_direct.php');
+        const text = await response.text();
+        if (text.includes('Database Connected')) {
+            showResult('test-results', '<p class="success">✅ Database connection successful!</p>');
+        } else {
+            showResult('test-results', '<p class="error">❌ Database connection failed!</p><pre>' + text + '</pre>');
+        }
+    } catch (error) {
+        showResult('test-results', '<p class="error">❌ Error: ' + error.message + '</p>');
+    }
+}
+
+async function testSession() {
+    showResult('test-results', '<p class="info">⏳ Checking active lab sessions...</p>');
+    try {
+        const response = await fetch('/typing/test_login.php');
+        const text = await response.text();
+        if (text.includes('TEST123') || text.includes('Active Lab Sessions')) {
+            showResult('test-results', '<p class="success">✅ Active session found with password TEST123!</p>');
+        } else {
+            showResult('test-results', '<p class="warning">⚠️ No active session found. Run quick_test_data.sql</p>');
+        }
+    } catch (error) {
+        showResult('test-results', '<p class="error">❌ Error: ' + error.message + '</p>');
+    }
+}
+
+async function testUser() {
+    showResult('test-results', '<p class="info">⏳ Checking test users...</p>');
+    try {
+        const response = await fetch('/typing/test_login.php');
+        const text = await response.text();
+        if (text.includes('1234567890123') && text.includes('ROLL001')) {
+            showResult('test-results', '<p class="success">✅ Test user exists in database!</p>');
+        } else {
+            showResult('test-results', '<p class="warning">⚠️ Test user not found. Run quick_test_data.sql</p>');
+        }
+    } catch (error) {
+        showResult('test-results', '<p class="error">❌ Error: ' + error.message + '</p>');
+    }
+}
+
+async function testLogin() {
+    showResult('test-results', '<p class="info">⏳ Testing login API endpoint...</p>');
+    try {
+        const response = await fetch('/typing/api_backend/login.php', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                cnic: '1234567890123',
+                rollno: 'ROLL001',
+                otp: 'TEST123'
+            })
+        });
+        const data = await response.json();
+        
+        if (data.status === 'ok') {
+            showResult('test-results', 
+                '<p class="success">✅ Login API works perfectly!</p>' +
+                '<p class="info">User: ' + data.user.name + '</p>' +
+                '<p class="info">Roll: ' + data.user.roll_no + '</p>'
+            );
+        } else {
+            showResult('test-results', 
+                '<p class="warning">⚠️ Login returned: ' + data.status + '</p>' +
+                '<pre>' + JSON.stringify(data, null, 2) + '</pre>'
+            );
+        }
+    } catch (error) {
+        showResult('test-results', '<p class="error">❌ Login API Error: ' + error.message + '</p>');
+    }
+}
+
+async function testParagraph() {
+    showResult('test-results', '<p class="info">⏳ Testing paragraph API...</p>');
+    try {
+        const response = await fetch('/typing/api_backend/get_paragraph.php');
+        const data = await response.json();
+        
+        if (data.content && data.content.length > 50) {
+            showResult('test-results', 
+                '<p class="success">✅ Paragraph API works!</p>' +
+                '<p class="info">Paragraph length: ' + data.content.length + ' characters</p>' +
+                '<p class="info">First 100 chars: ' + data.content.substring(0, 100) + '...</p>'
+            );
+        } else {
+            showResult('test-results', '<p class="error">❌ Paragraph data invalid or empty</p>');
+        }
+    } catch (error) {
+        showResult('test-results', '<p class="error">❌ Paragraph API Error: ' + error.message + '</p>');
+    }
+}
+
+async function checkEndpoints() {
+    const endpoints = [
+        '/typing/api_backend/login.php',
+        '/typing/api_backend/get_paragraph.php',
+        '/typing/api_backend/save_result.php',
+        '/typing/api_backend/admin/admin_login.php',
+        '/typing/api_backend/admin/api.php'
+    ];
+    
+    let html = '<table style="width:100%;border-collapse:collapse;margin-top:10px">';
+    html += '<tr style="background:#1a237e;color:white"><th style="padding:8px;text-align:left">Endpoint</th><th style="padding:8px">Status</th></tr>';
+    
+    for (const endpoint of endpoints) {
+        try {
+            const response = await fetch(endpoint, {method: 'POST', body: '{}'});
+            const status = response.ok ? 
+                '<span class="status-badge badge-pass">✓ Accessible</span>' : 
+                '<span class="status-badge badge-fail">✗ Error ' + response.status + '</span>';
+            html += `<tr><td style="padding:8px;border:1px solid #ddd"><code>${endpoint}</code></td><td style="padding:8px;border:1px solid #ddd;text-align:center">${status}</td></tr>`;
+        } catch (error) {
+            html += `<tr><td style="padding:8px;border:1px solid #ddd"><code>${endpoint}</code></td><td style="padding:8px;border:1px solid #ddd;text-align:center"><span class="status-badge badge-fail">✗ Failed</span></td></tr>`;
+        }
+    }
+    html += '</table>';
+    showResult('endpoint-status', html);
+}
+
+async function resetTestUser() {
+    if (!confirm('Reset test user (CNIC: 1234567890123)? This will allow re-testing.')) return;
+    
+    showResult('test-results', '<p class="info">⏳ Resetting test user...</p>');
+    
+    // This would need a PHP script to execute the SQL
+    showResult('test-results', 
+        '<p class="warning">⚠️ Manual Reset Required</p>' +
+        '<p>Run this SQL in phpMyAdmin:</p>' +
+        '<pre>UPDATE users SET tested=0, logged_once=0 WHERE cnic=\'1234567890123\';</pre>'
+    );
+}
+
+function viewLogs() {
+    alert('Check these log files:\n\n' +
+          '1. C:\\wamp64\\logs\\php_error.log\n' +
+          '2. C:\\wamp64\\logs\\apache_error.log\n' +
+          '3. Browser Console (F12)\n' +
+          '4. Network Tab in DevTools');
+}
+
+// Auto-run basic check on load
+window.onload = function() {
+    console.log('%c✅ Verification page loaded successfully!', 'color: green; font-size: 16px; font-weight: bold;');
+    console.log('Click the test buttons to verify each component.');
+};
+</script>
+</body>
+</html>

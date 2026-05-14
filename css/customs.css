@@ -1,0 +1,44 @@
+/* ── Base resets already in index.html inline styles ── */
+/* This file keeps legacy styles for older JS files & adds global overrides */
+
+@font-face {
+  font-family: "clock-font";
+  src: url("../fonts/RADIOLAND.TTF");
+}
+
+/* Legacy clock (kept for old process.js if still used) */
+.clock {
+  font-family: "clock-font";
+  width: 200px;
+  font-size: 50px;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #c5cae9; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #9fa8da; }
+
+/* Vue cloak */
+[v-cloak] { display: none !important; }
+
+/* Fade transition */
+.fade-enter-active, .fade-leave-active { transition: opacity .3s ease; }
+.fade-enter, .fade-leave-to { opacity: 0; }
+
+/* Slide transition */
+.slide-enter-active, .slide-leave-active { transition: all .3s ease; }
+.slide-enter { transform: translateY(16px); opacity: 0; }
+.slide-leave-to { transform: translateY(-16px); opacity: 0; }
+
+/* Typing paragraph spans */
+.typing-paragraph span { border-radius: 4px; padding: 0 2px; }
+
+/* Input: block cut/copy/paste visually */
+.typed-words { caret-color: #1a237e; }
+
+/* Legacy materialize progress override (login loader) */
+.progress { margin: 0 !important; }
+
+/* Admin panel cloak */
+[v-cloak] { display: none; }

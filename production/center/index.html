@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ETEA Center Incharge Portal</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root{--p:#0f4c81;--a:#0ea5e9;--bg:#eef5fb;--card:#fff;--text:#102a43;--muted:#6b7c93;--b:#d7e2ef;--ok:#16a34a;--warn:#d97706}
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Inter',sans-serif;background:linear-gradient(140deg,#eff6ff,#e0f2fe);color:var(--text)}
+    .wrap{max-width:1180px;margin:0 auto;padding:20px}
+    .card{background:var(--card);border:1px solid var(--b);border-radius:14px;box-shadow:0 10px 24px rgba(15,76,129,.08)}
+    .login{max-width:420px;margin:80px auto;padding:24px}
+    .title{font-family:'Rajdhani',sans-serif;font-weight:700;color:var(--p);font-size:30px}
+    .title-row{display:flex;align-items:center;gap:10px}
+    .brand-logo-header{width:28px;height:28px;object-fit:contain;border-radius:6px}
+    .brand-logo-login{width:40px;height:40px;object-fit:contain;border-radius:8px}
+    .sub{font-size:13px;color:var(--muted);margin-top:4px}
+    .fg{margin-top:14px}
+    label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-bottom:5px}
+    input{width:100%;border:2px solid var(--b);border-radius:9px;padding:10px 11px;font-size:14px;outline:none}
+    input:focus{border-color:var(--a)}
+    button{border:none;border-radius:9px;background:var(--p);color:#fff;padding:10px 14px;font-weight:600;cursor:pointer}
+    button.alt{background:#fff;color:var(--p);border:1px solid var(--b)}
+    .err{margin-top:12px;background:#fee2e2;color:#991b1b;padding:10px;border-radius:8px;font-size:13px}
+    .head{display:flex;justify-content:space-between;align-items:center;padding:16px 18px;border-bottom:1px solid var(--b)}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin:14px 0}
+    .tile{padding:14px;border:1px solid var(--b);border-radius:12px;background:#fff}
+    .tile.clickable{cursor:pointer;transition:transform .15s ease,box-shadow .15s ease,border-color .15s ease}
+    .tile.clickable:hover{transform:translateY(-2px);border-color:var(--a);box-shadow:0 8px 20px rgba(14,165,233,.18)}
+    .num{font-family:'Rajdhani',sans-serif;font-size:34px;font-weight:700;color:var(--p)}
+    .lbl{font-size:12px;color:var(--muted)}
+    .section{margin-top:14px}
+    .toolbar{display:flex;gap:8px;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--b)}
+    .reason-btn{padding:6px 10px;font-size:12px}
+    .muted{font-size:12px;color:var(--muted)}
+    .tabbar{display:flex;gap:8px;padding:12px 16px;border-bottom:1px solid var(--b);flex-wrap:wrap}
+    .tabbtn{background:#fff;border:1px solid var(--b);color:var(--p)}
+    .tabbtn.active{background:var(--p);color:#fff;border-color:var(--p)}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:9px 10px;border-bottom:1px solid #edf2f7;font-size:13px;text-align:left}
+    th{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted)}
+    .badge{padding:4px 8px;border-radius:999px;font-size:11px;font-weight:600}
+    .ok{background:#dcfce7;color:#166534}
+    .wait{background:#fef3c7;color:#92400e}
+    .lock{background:#fee2e2;color:#991b1b}
+    .toast{position:fixed;top:16px;right:16px;background:#0f172a;color:#fff;padding:10px 14px;border-radius:8px;box-shadow:0 10px 24px rgba(0,0,0,.25);font-size:13px;z-index:1300}
+    .modal-overlay{position:fixed;inset:0;background:rgba(16,42,67,.55);display:flex;align-items:center;justify-content:center;padding:20px;z-index:1200}
+    .modal-card{width:100%;max-width:520px;background:#fff;border:1px solid var(--b);border-radius:12px;box-shadow:0 20px 45px rgba(0,0,0,.2);overflow:hidden}
+    .modal-head{padding:14px 16px;border-bottom:1px solid var(--b);font-weight:700;color:var(--p)}
+    .modal-body{padding:16px;display:grid;gap:12px}
+    .modal-actions{padding:12px 16px;border-top:1px solid var(--b);display:flex;justify-content:flex-end;gap:8px}
+    .status-filter{border:1px solid var(--b);border-radius:8px;padding:8px 10px;font-size:13px;background:#fff;color:var(--text)}
+  </style>
+</head>
+<body>
+<div id="app" class="wrap">
+  <div class="toast" v-if="toast.show">{{toast.msg}}</div>
+
+  <div class="modal-overlay" v-if="confirmModal.show" @click.self="closeConfirmModal">
+    <div class="modal-card" style="max-width:440px;">
+      <div class="modal-head">Please Confirm</div>
+      <div class="modal-body">
+        <div class="muted">{{confirmModal.message}}</div>
+      </div>
+      <div class="modal-actions">
+        <button class="alt" @click="closeConfirmModal">Cancel</button>
+        <button @click="executeConfirmModal">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" v-if="retestModal.show" @click.self="closeRetestModal">
+    <div class="modal-card" style="max-width:520px;">
+      <div class="modal-head">Allow Retest</div>
+      <div class="modal-body">
+        <div class="muted">Candidate: <b>{{retestModal.name}}</b> (Roll: {{retestModal.roll_no}})</div>
+        <div>
+          <label>Reason</label>
+          <textarea v-model="retestModal.reason" rows="3" style="width:100%;border:2px solid var(--b);border-radius:9px;padding:10px 11px;font-size:14px;resize:vertical" placeholder="Enter reason for allowing retest"></textarea>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="alt" @click="closeRetestModal">Cancel</button>
+        <button @click="submitRetest">Allow</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card login" v-if="!user">
+    <div class="title-row"><img src="../logo.png" alt="ETEA" class="brand-logo-login"><div class="title">ETEA</div></div>
+    <div class="sub">Login to manage your assigned center data</div>
+    <div class="fg"><label>Username</label><input v-model="login.username" @keyup.enter="doLogin"></div>
+    <div class="fg"><label>Password</label><input type="password" v-model="login.password" @keyup.enter="doLogin"></div>
+    <div class="fg"><button style="width:100%" @click="doLogin">Sign In</button></div>
+    <div class="err" v-if="err">{{err}}</div>
+  </div>
+
+  <div v-else>
+    <div class="card">
+      <div class="head">
+        <div>
+          <div class="title-row"><img src="../logo.png" alt="ETEA" class="brand-logo-header"><div class="title" style="font-size:24px">{{user.center_name}} Center</div></div>
+          <div class="sub">Incharge: {{user.full_name}} ({{user.username}})</div>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="alt" @click="refreshAll">Refresh</button>
+          <button @click="logout">Logout</button>
+        </div>
+      </div>
+      <div class="tabbar">
+        <button class="tabbtn" :class="{active: currentTab==='dashboard'}" @click="currentTab='dashboard'">Dashboard</button>
+        <button class="tabbtn" :class="{active: currentTab==='sessions'}" @click="currentTab='sessions'">Lab Session Password</button>
+        <button class="tabbtn" :class="{active: currentTab==='results'}" @click="currentTab='results'">Results</button>
+      </div>
+      <div style="padding:14px 16px;">
+        <div class="section card" v-if="currentTab==='sessions'" style="padding:12px 14px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+          <div>
+            <div style="font-weight:700;color:var(--p)">Lab Session Password</div>
+            <div class="muted" v-if="activeSession">Active: <strong>{{activeSession.session_password}}</strong> (created {{fmt(activeSession.created_at)}})</div>
+            <div class="muted" v-else>No active session for this center</div>
+          </div>
+          <button @click="generateSession">Generate New Password</button>
+        </div>
+
+        <div class="section card" v-if="currentTab==='sessions'" style="padding:0;overflow:hidden">
+          <div class="head"><strong>Password History</strong></div>
+          <div style="max-height:260px;overflow:auto">
+            <table>
+              <thead><tr><th>ID</th><th>Password</th><th>Status</th><th>Created</th><th>Action</th></tr></thead>
+              <tbody>
+                <tr v-for="s in sessions" :key="s.id">
+                  <td>{{s.id}}</td>
+                  <td><strong>{{s.session_password}}</strong></td>
+                  <td><span class="badge" :class="s.status==='active' ? 'ok' : 'wait'">{{s.status}}</span></td>
+                  <td>{{fmt(s.created_at)}}</td>
+                  <td>
+                    <button class="alt reason-btn" v-if="s.status==='active'" @click="expireSession(s)">Expire</button>
+                    <span class="muted" v-else>—</span>
+                  </td>
+                </tr>
+                <tr v-if="sessions.length===0"><td colspan="5">No sessions found</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="grid" v-if="currentTab==='dashboard'">
+          <div class="tile"><div class="num">{{stats.total||0}}</div><div class="lbl">Total Candidates</div></div>
+          <div class="tile clickable" @click="showLoggedCandidates" title="Show logged in candidates"><div class="num">{{stats.logged||0}}</div><div class="lbl">Logged In (Click to Filter)</div></div>
+          <div class="tile"><div class="num">{{stats.tested||0}}</div><div class="lbl">Completed Tests</div></div>
+          <div class="tile"><div class="num" style="color:var(--ok)">{{stats.passed||0}}</div><div class="lbl">Passed</div></div>
+          <div class="tile"><div class="num" style="color:#dc2626">{{stats.failed||0}}</div><div class="lbl">Failed</div></div>
+        </div>
+
+        <div class="section card" v-if="currentTab==='dashboard'" style="padding:0;overflow:hidden">
+          <div class="toolbar">
+            <strong>Candidates</strong>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
+              <select v-model="candidateStatusFilter" @change="candidatePage=1" class="status-filter">
+                <option value="all">All Statuses</option>
+                <option value="logged">Logged In</option>
+                <option value="locked">Locked</option>
+                <option value="pending">Pending</option>
+              </select>
+              <input v-model="candidateSearch" @input="candidatePage=1" placeholder="Search Roll No / CNIC" style="max-width:220px;width:100%;border:1px solid var(--b);border-radius:8px;padding:8px 10px;">
+            </div>
+          </div>
+          <div style="max-height:260px;overflow:auto">
+            <table>
+              <thead><tr><th>Name</th><th>CNIC</th><th>Roll</th><th>Post</th><th>Type</th><th>Status</th><th>Retest</th></tr></thead>
+              <tbody>
+                <tr v-for="c in pagedCandidates" :key="c.id">
+                  <td>{{c.name}}</td><td>{{c.cnic}}</td><td>{{c.roll_no}}</td><td>{{c.post || '—'}}</td>
+                  <td><span class="badge ok">{{c.type_name || ('Type ' + (c.type || '—'))}}</span></td>
+                  <td>
+                    <span class="badge ok" v-if="c.tested==='1'">Tested</span>
+                    <span class="badge wait" v-else-if="c.logged_once==='1' && c.has_live_attempt=='1'">In Progress</span>
+                    <span class="badge lock" v-else-if="c.logged_once==='1'">Locked (Incomplete)</span>
+                    <span class="badge wait" v-else>Pending</span>
+                  </td>
+                  <td>
+                    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                      <button class="alt reason-btn" v-if="c.tested==='1' && c.allow_retest!=='1'" @click="allowRetest(c)">Allow Retest</button>
+                      <span class="muted" v-else-if="c.allow_retest==='1'">Allowed</span>
+                      <button class="alt reason-btn" v-if="c.tested!=='1' && c.logged_once==='1'" @click="unlockCandidate(c)">Reset / Unlock</button>
+                      <span class="muted" v-if="c.tested!=='1' && c.logged_once!=='1' && c.allow_retest!=='1'">—</span>
+                    </div>
+                  </td>
+                </tr>
+                <tr v-if="filteredCandidates.length===0"><td colspan="7">No candidates found</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-top:1px solid var(--b);" v-if="filteredCandidates.length>0">
+            <div class="muted">Showing {{pagedCandidates.length}} of {{filteredCandidates.length}}</div>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <button class="alt reason-btn" :disabled="candidatePage<=1" @click="candidatePage--">Prev</button>
+              <span class="muted">{{candidatePage}} / {{candidateTotalPages}}</span>
+              <button class="alt reason-btn" :disabled="candidatePage>=candidateTotalPages" @click="candidatePage++">Next</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="section card" v-if="currentTab==='results'" style="padding:0;overflow:hidden">
+          <div class="toolbar">
+            <strong>Results</strong>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <input v-model="resultSearch" @input="resultPage=1" placeholder="Search Roll No / CNIC" style="max-width:220px;width:100%;border:1px solid var(--b);border-radius:8px;padding:8px 10px;">
+              <button class="alt" @click="downloadExcel">Download Excel (CSV)</button>
+            </div>
+          </div>
+          <div style="max-height:260px;overflow:auto">
+            <table>
+              <thead><tr><th>Name</th><th>Roll</th><th>Status</th><th>WPM</th><th>Accuracy</th><th>Date</th></tr></thead>
+              <tbody>
+                <tr v-for="r in pagedResults" :key="r.id">
+                  <td>{{r.name}}</td>
+                  <td>{{r.roll_no}}</td>
+                  <td><span class="badge" :class="r.status==='Passed' ? 'ok' : r.status==='Failed' ? 'lock' : 'wait'">{{r.status || '—'}}</span></td>
+                  <td>{{r.wpm}}</td>
+                  <td>{{r.accuracy}}</td>
+                  <td>{{fmt(r.date)}}</td>
+                </tr>
+                <tr v-if="filteredResults.length===0"><td colspan="6">No results yet</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-top:1px solid var(--b);" v-if="filteredResults.length>0">
+            <div class="muted">Showing {{pagedResults.length}} of {{filteredResults.length}}</div>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <button class="alt reason-btn" :disabled="resultPage<=1" @click="resultPage--">Prev</button>
+              <span class="muted">{{resultPage}} / {{resultTotalPages}}</span>
+              <button class="alt reason-btn" :disabled="resultPage>=resultTotalPages" @click="resultPage++">Next</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="../js/vue.js"></script>
+<script src="../js/vue-http.js"></script>
+<script>
+const APP_BASE = (window.location.pathname.match(/^(.*\/)(center\/?)/i)?.[1] || '/').replace(/\/+$/, '/') + '';
+const centerApi = action => APP_BASE + 'api_backend/center/api.php' + (action ? ('?action=' + action) : '');
+const centerLoginApi = APP_BASE + 'api_backend/center/login.php';
+
+new Vue({
+  el:'#app',
+  data:{
+    user:null,
+    login:{username:'',password:''},
+    err:'',
+    currentTab:'dashboard',
+    stats:{},
+    candidates:[],
+    results:[],
+    activeSession:null,
+    sessions:[],
+    candidateSearch:'',
+    candidateStatusFilter:'all',
+    resultSearch:'',
+    candidatePage:1,
+    resultPage:1,
+    pageSize:20,
+    retestModal:{show:false,user_id:null,name:'',roll_no:'',reason:''},
+    confirmModal:{show:false,message:'',action:'',payload:null},
+    toast:{show:false,msg:''}
+  },
+  computed:{
+    candidateStatusMatcher(){
+      return c=>{
+        const logged=String(c && c.logged_once || '')==='1';
+        const tested=String(c && c.tested || '')==='1';
+        const live=String(c && c.has_live_attempt || '')==='1';
+        const status=this.candidateStatusFilter;
+        if(status==='logged') return logged;
+        if(status==='locked') return logged && !live && !tested;
+        if(status==='pending') return !logged;
+        return true;
+      };
+    },
+    filteredCandidates(){
+      const q=(this.candidateSearch||'').toLowerCase().trim();
+      const byStatus=this.candidates.filter(this.candidateStatusMatcher);
+      if(!q) return byStatus;
+      return byStatus.filter(c=>String(c.roll_no||'').toLowerCase().includes(q) || String(c.cnic||'').toLowerCase().includes(q));
+    },
+    candidateTotalPages(){
+      return Math.max(1, Math.ceil(this.filteredCandidates.length/this.pageSize));
+    },
+    pagedCandidates(){
+      const pg=Math.min(this.candidatePage, this.candidateTotalPages);
+      const start=(pg-1)*this.pageSize;
+      return this.filteredCandidates.slice(start, start+this.pageSize);
+    },
+    filteredResults(){
+      const q=(this.resultSearch||'').toLowerCase().trim();
+      if(!q) return this.results;
+      return this.results.filter(r=>String(r.roll_no||'').toLowerCase().includes(q) || String(r.cnic||'').toLowerCase().includes(q));
+    },
+    resultTotalPages(){
+      return Math.max(1, Math.ceil(this.filteredResults.length/this.pageSize));
+    },
+    pagedResults(){
+      const pg=Math.min(this.resultPage, this.resultTotalPages);
+      const start=(pg-1)*this.pageSize;
+      return this.filteredResults.slice(start, start+this.pageSize);
+    }
+  },
+  methods:{
+    showToast(msg){
+      this.toast={show:true,msg};
+      setTimeout(()=>{ this.toast.show=false; },2500);
+    },
+    openConfirmModal(message, action, payload){
+      this.confirmModal={show:true,message,action,payload};
+    },
+    closeConfirmModal(){
+      this.confirmModal={show:false,message:'',action:'',payload:null};
+    },
+    executeConfirmModal(){
+      const {action,payload}=this.confirmModal;
+      this.closeConfirmModal();
+      if(action==='expire_session') this.doExpireSession(payload);
+      if(action==='unlock_candidate') this.doUnlockCandidate(payload);
+    },
+    closeRetestModal(){
+      this.retestModal={show:false,user_id:null,name:'',roll_no:'',reason:''};
+    },
+    doLogin(){
+      this.err='';
+      if(!this.login.username || !this.login.password){this.err='Enter username and password';return;}
+      this.$http.post(centerLoginApi, JSON.stringify(this.login)).then(r=>{
+        if(r.body.status==='ok'){ this.user=r.body.incharge; this.refreshAll(); }
+        else this.err=r.body.message || 'Login failed';
+      }).catch(()=>this.err='Server error');
+    },
+    refreshAll(){
+      this.$http.get(centerApi('dashboard')).then(r=>{
+        const b=r.body;
+        if(b.status==='unauthorized'){this.user=null;return;}
+        this.stats=b.stats||{};
+        this.candidates=b.candidates||[];
+        this.results=b.results||[];
+        this.activeSession=b.active_session||null;
+        this.sessions=b.sessions||[];
+        this.candidatePage=1;
+        this.resultPage=1;
+      }).catch(()=>{
+        this.showToast('Unable to load dashboard data');
+      });
+    },
+    showLoggedCandidates(){
+      this.currentTab='dashboard';
+      this.candidateStatusFilter='logged';
+      this.candidateSearch='';
+      this.candidatePage=1;
+      this.showToast('Showing logged in candidates');
+    },
+    bootSession(){
+      this.$http.get(centerApi('me')).then(r=>{
+        if(r.body && r.body.status==='ok' && r.body.user){
+          this.user = r.body.user;
+          this.refreshAll();
+        }
+      }).catch(()=>{});
+    },
+    generateSession(){
+      this.$http.post(centerApi('create_session'), JSON.stringify({})).then(r=>{
+        if(r.body.status==='ok'){
+          this.activeSession={session_password:r.body.password, created_at:new Date().toISOString()};
+          this.refreshAll();
+          this.showToast('New session password: '+r.body.password);
+        } else {
+          this.showToast(r.body.message || 'Could not generate session password');
+        }
+      });
+    },
+    expireSession(s){
+      this.openConfirmModal('Expire session password '+s.session_password+' ?', 'expire_session', s.id);
+    },
+    doExpireSession(id){
+      this.$http.post(centerApi('expire_session'), JSON.stringify({id:id})).then(r=>{
+        if(r.body.status==='ok'){
+          this.refreshAll();
+          this.showToast('Session expired');
+        } else {
+          this.showToast(r.body.message || 'Unable to expire session');
+        }
+      });
+    },
+    allowRetest(c){
+      this.retestModal={show:true,user_id:c.id,name:c.name,roll_no:c.roll_no,reason:''};
+    },
+    submitRetest(){
+      const m=this.retestModal;
+      if(!m.reason || m.reason.trim().length < 5){ this.showToast('Reason is required (min 5 chars).'); return; }
+      this.$http.post(centerApi('allow_retest'), JSON.stringify({user_id:m.user_id, reason:m.reason.trim()})).then(r=>{
+        if(r.body.status==='ok'){
+          this.showToast('Retest allowed');
+          this.closeRetestModal();
+          this.refreshAll();
+        } else {
+          this.showToast(r.body.message || 'Unable to allow retest');
+        }
+      });
+    },
+    unlockCandidate(c){
+      const statusLabel = c.has_live_attempt === '1' ? 'in progress' : 'locked';
+      this.openConfirmModal('Reset '+statusLabel+' candidate '+c.name+' ('+c.roll_no+') ?', 'unlock_candidate', c.id);
+    },
+    doUnlockCandidate(userId){
+      this.$http.post(centerApi('unlock_candidate'), JSON.stringify({user_id:userId})).then(r=>{
+        if(r.body.status==='ok'){
+          this.showToast('Candidate reset successfully.');
+          this.refreshAll();
+        } else {
+          this.showToast(r.body.message || 'Unable to unlock candidate');
+        }
+      });
+    },
+    downloadExcel(){
+      window.open(centerApi('export_results'), '_blank');
+    },
+    logout(){
+      this.$http.get(centerApi('logout')).then(()=>{
+        this.user=null;
+        this.login={username:'',password:''};
+      });
+    },
+    fmt(v){
+      if(!v) return '—';
+      return new Date(v).toLocaleString('en-PK',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+    }
+  },
+  mounted(){
+    this.bootSession();
+  }
+});
+</script>
+</body>
+</html>
