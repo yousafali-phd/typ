@@ -39,6 +39,8 @@
       flex-direction: column;
       flex-shrink: 0;
       overflow-y: auto;
+      transition: width .2s ease, transform .25s ease;
+      z-index: 2000;
     }
     .sidebar-logo {
       padding: 20px 16px 16px;
@@ -102,6 +104,42 @@
     .nav-item.active { background: rgba(0,176,255,.1); color: var(--accent); border-left-color: var(--accent); }
     .nav-item i { font-size: 18px; }
 
+    #app.sidebar-collapsed .sidebar {
+      width: 72px;
+    }
+    #app.sidebar-collapsed .sidebar-logo {
+      padding: 18px 10px 14px;
+      text-align: center;
+    }
+    #app.sidebar-collapsed .sidebar-logo .logo-main {
+      justify-content: center;
+    }
+    #app.sidebar-collapsed .logo-text,
+    #app.sidebar-collapsed .logo-sub,
+    #app.sidebar-collapsed .sidebar-section-label,
+    #app.sidebar-collapsed .nav-item span,
+    #app.sidebar-collapsed .admin-name,
+    #app.sidebar-collapsed .admin-role,
+    #app.sidebar-collapsed .logout-btn span {
+      display: none;
+    }
+    #app.sidebar-collapsed .nav-item {
+      justify-content: center;
+      padding: 10px 8px;
+      border-left-width: 0;
+      border-radius: 8px;
+      margin: 2px 8px;
+    }
+    #app.sidebar-collapsed .sidebar-footer {
+      padding: 12px 10px;
+    }
+    #app.sidebar-collapsed .admin-badge {
+      justify-content: center;
+    }
+    #app.sidebar-collapsed .logout-btn {
+      padding: 7px 0;
+    }
+
     .sidebar-footer {
       margin-top: auto;
       padding: 12px 16px;
@@ -152,9 +190,33 @@
       flex-shrink: 0;
       box-shadow: 0 1px 4px rgba(0,0,0,.05);
     }
+    .topbar-left { display: flex; align-items: center; gap: 10px; }
     .topbar-title { font-size: 16px; font-weight: 700; color: var(--primary); }
     .topbar-right { display: flex; align-items: center; gap: 12px; }
     .topbar-date { font-size: 12px; color: var(--muted); }
+    .menu-toggle {
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #fff;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      color: var(--primary);
+    }
+    .menu-toggle i { font-size: 20px; }
+    .menu-toggle:hover { border-color: var(--accent); color: var(--accent); }
+    .mobile-only { display: none; }
+
+    .sidebar-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(17, 24, 39, .45);
+      z-index: 1900;
+      display: none;
+    }
 
     .content {
       flex: 1;
@@ -419,6 +481,63 @@
     }
     @keyframes slideIn { from { transform: translateY(20px); opacity:0; } to { transform: translateY(0); opacity:1; } }
 
+    @media (max-width: 1100px) {
+      .stat-grid { grid-template-columns: repeat(2, 1fr); }
+      .analytics-grid { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 900px) {
+      html, body { overflow: auto; }
+      #app { height: auto; min-height: 100vh; }
+      .sidebar {
+        position: fixed;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        transform: translateX(-100%);
+        width: min(82vw, 280px);
+        box-shadow: 12px 0 28px rgba(0,0,0,.35);
+      }
+      #app.sidebar-mobile-open .sidebar {
+        transform: translateX(0);
+      }
+      #app.sidebar-mobile-open .sidebar-backdrop {
+        display: block;
+      }
+      .desktop-only { display: none; }
+      .mobile-only { display: inline-flex; }
+      .main {
+        width: 100%;
+        min-height: 100vh;
+      }
+      .topbar {
+        padding: 0 12px;
+      }
+      .content {
+        padding: 14px;
+      }
+      .card-header {
+        flex-wrap: wrap;
+      }
+      .topbar-right {
+        gap: 8px;
+      }
+      .topbar-date {
+        display: none;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .stat-grid { grid-template-columns: 1fr; }
+      .password-display .pw { font-size: 42px; letter-spacing: 6px; }
+      .result-grid,
+      .admin-result-preview .result-grid { grid-template-columns: 1fr 1fr; }
+      .admin-login-card {
+        margin: 12px;
+        padding: 30px 20px;
+      }
+    }
+
     .section-divider { display: flex; align-items: center; gap: 12px; margin: 20px 0; }
     .section-divider hr { flex:1; border: none; border-top: 1px solid var(--border); }
     .section-divider span { font-size: 11px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 1px; white-space: nowrap; }
@@ -466,7 +585,7 @@
   </style>
 </head>
 <body>
-<div id="app" v-cloak>
+<div id="app" v-cloak :class="{ 'sidebar-collapsed': sidebarCollapsed, 'sidebar-mobile-open': mobileSidebarOpen }">
 
   <!-- ══════════ TOAST ══════════ -->
   <transition name="fade">
@@ -565,48 +684,50 @@
 
   <!-- ══════════ MAIN APP ══════════ -->
   <template v-else>
+    <div class="sidebar-backdrop" @click="closeMobileSidebar"></div>
+
     <div class="sidebar">
       <div class="sidebar-logo">
-        <div class="logo-main"><img src="../logo.png" alt="ETEA" class="brand-logo-mini"> ETEA</div>
+        <div class="logo-main"><img src="../logo.png" alt="ETEA" class="brand-logo-mini"> <span class="logo-text">ETEA</span></div>
         <div class="logo-sub">Typing Test — Admin</div>
       </div>
 
       <div class="sidebar-section">
         <div class="sidebar-section-label">Overview</div>
-        <div class="nav-item" :class="{active: page==='dashboard'}" @click="page='dashboard'">
-          <i class="material-icons">dashboard</i> Dashboard
+        <div class="nav-item" :class="{active: page==='dashboard'}" @click="setPage('dashboard')">
+          <i class="material-icons">dashboard</i> <span>Dashboard</span>
         </div>
-        <div class="nav-item" :class="{active: page==='analytics'}" @click="page='analytics';loadAnalytics()">
-          <i class="material-icons">bar_chart</i> Analytics
+        <div class="nav-item" :class="{active: page==='analytics'}" @click="setPage('analytics', 'loadAnalytics')">
+          <i class="material-icons">bar_chart</i> <span>Analytics</span>
         </div>
       </div>
 
       <div class="sidebar-section">
         <div class="sidebar-section-label">Management</div>
-        <div class="nav-item" :class="{active: page==='candidates'}" @click="page='candidates';loadCandidates()">
-          <i class="material-icons">people</i> Candidates
+        <div class="nav-item" :class="{active: page==='candidates'}" @click="setPage('candidates', 'loadCandidates')">
+          <i class="material-icons">people</i> <span>Candidates</span>
         </div>
-        <div class="nav-item" :class="{active: page==='paragraphs'}" @click="page='paragraphs';loadParagraphs()">
-          <i class="material-icons">description</i> Paragraphs
+        <div class="nav-item" :class="{active: page==='paragraphs'}" @click="setPage('paragraphs', 'loadParagraphs')">
+          <i class="material-icons">description</i> <span>Paragraphs</span>
         </div>
-        <div class="nav-item" :class="{active: page==='typecodes'}" @click="page='typecodes';loadTypeCodes()">
-          <i class="material-icons">sell</i> Type Codes
+        <div class="nav-item" :class="{active: page==='typecodes'}" @click="setPage('typecodes', 'loadTypeCodes')">
+          <i class="material-icons">sell</i> <span>Type Codes</span>
         </div>
-        <div class="nav-item" :class="{active: page==='centers'}" @click="page='centers';loadCenters()">
-          <i class="material-icons">location_city</i> Centers
+        <div class="nav-item" :class="{active: page==='centers'}" @click="setPage('centers', 'loadCenters')">
+          <i class="material-icons">location_city</i> <span>Centers</span>
         </div>
-        <div class="nav-item" :class="{active: page==='incharges'}" @click="page='incharges';loadIncharges()">
-          <i class="material-icons">supervisor_account</i> Center Incharges
+        <div class="nav-item" :class="{active: page==='incharges'}" @click="setPage('incharges', 'loadIncharges')">
+          <i class="material-icons">supervisor_account</i> <span>Center Incharges</span>
         </div>
       </div>
 
       <div class="sidebar-section">
         <div class="sidebar-section-label">Exam</div>
-        <div class="nav-item" :class="{active: page==='sessions'}" @click="page='sessions';loadSessions()">
-          <i class="material-icons">vpn_key</i> Lab Sessions
+        <div class="nav-item" :class="{active: page==='sessions'}" @click="setPage('sessions', 'loadSessions')">
+          <i class="material-icons">vpn_key</i> <span>Lab Sessions</span>
         </div>
-        <div class="nav-item" :class="{active: page==='results'}" @click="page='results';loadResults()">
-          <i class="material-icons">assignment_turned_in</i> Results
+        <div class="nav-item" :class="{active: page==='results'}" @click="setPage('results', 'loadResults')">
+          <i class="material-icons">assignment_turned_in</i> <span>Results</span>
         </div>
       </div>
 
@@ -619,14 +740,22 @@
           </div>
         </div>
         <button class="logout-btn" @click="logout">
-          <i class="material-icons" style="font-size:16px">logout</i> Sign Out
+          <i class="material-icons" style="font-size:16px">logout</i> <span>Sign Out</span>
         </button>
       </div>
     </div>
 
     <div class="main">
       <div class="topbar">
-        <div class="topbar-title">{{pageTitle}}</div>
+        <div class="topbar-left">
+          <button class="menu-toggle desktop-only" @click="toggleDesktopSidebar" title="Toggle sidebar">
+            <i class="material-icons">menu_open</i>
+          </button>
+          <button class="menu-toggle mobile-only" @click="toggleMobileSidebar" title="Open menu">
+            <i class="material-icons">menu</i>
+          </button>
+          <div class="topbar-title">{{pageTitle}}</div>
+        </div>
         <div class="topbar-right">
           <div class="refresh-indicator">
             <span class="live-dot"></span> Live
@@ -635,7 +764,7 @@
         </div>
       </div>
 
-      <div class="content">
+      <div class="content" @click="closeMobileSidebar">
 
         <!-- ═══ DASHBOARD ═══ -->
         <div v-if="page==='dashboard'">
@@ -1515,6 +1644,9 @@ new Vue({
     candidateTab: 'list',
     // Auto-refresh
     refreshTimer: null,
+    sidebarCollapsed: false,
+    mobileSidebarOpen: false,
+    mobileBreakpoint: 900,
   },
   computed: {
     pageTitle() {
@@ -1612,6 +1744,47 @@ new Vue({
           this.init();
         }
       }).catch(() => {});
+    },
+
+    loadSidebarState() {
+      try {
+        const saved = localStorage.getItem('admin_sidebar_collapsed');
+        this.sidebarCollapsed = saved === '1';
+      } catch (_) {
+        this.sidebarCollapsed = false;
+      }
+      this.handleViewportChange();
+    },
+    saveSidebarState() {
+      try {
+        localStorage.setItem('admin_sidebar_collapsed', this.sidebarCollapsed ? '1' : '0');
+      } catch (_) {}
+    },
+    handleViewportChange() {
+      if (window.innerWidth > this.mobileBreakpoint) {
+        this.mobileSidebarOpen = false;
+      }
+    },
+    toggleDesktopSidebar() {
+      if (window.innerWidth <= this.mobileBreakpoint) return;
+      this.sidebarCollapsed = !this.sidebarCollapsed;
+      this.saveSidebarState();
+    },
+    toggleMobileSidebar() {
+      if (window.innerWidth > this.mobileBreakpoint) return;
+      this.mobileSidebarOpen = !this.mobileSidebarOpen;
+    },
+    closeMobileSidebar() {
+      if (window.innerWidth <= this.mobileBreakpoint) {
+        this.mobileSidebarOpen = false;
+      }
+    },
+    setPage(nextPage, loader) {
+      this.page = nextPage;
+      if (loader && typeof this[loader] === 'function') {
+        this[loader]();
+      }
+      this.closeMobileSidebar();
     },
 
     // ── INIT ──
@@ -2295,7 +2468,12 @@ new Vue({
     },
   },
   mounted() {
+    this.loadSidebarState();
+    window.addEventListener('resize', this.handleViewportChange);
     this.bootAdminSession();
+  },
+  beforeDestroy() {
+    window.removeEventListener('resize', this.handleViewportChange);
   }
 });
 </script>
