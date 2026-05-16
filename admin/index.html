@@ -731,6 +731,13 @@
         </div>
       </div>
 
+      <div class="sidebar-section">
+        <div class="sidebar-section-label">Maintenance</div>
+        <div class="nav-item" :class="{active: page==='archive'}" @click="setPage('archive', 'loadArchives')">
+          <i class="material-icons">archive</i> <span>Archive & Backup</span>
+        </div>
+      </div>
+
       <div class="sidebar-footer">
         <div class="admin-badge">
           <div class="admin-avatar">{{admin.full_name ? admin.full_name[0].toUpperCase() : 'A'}}</div>
@@ -1189,6 +1196,21 @@
                     <div v-if="csvPreview.length>20" style="text-align:center;padding:8px;color:var(--muted);font-size:12px">... and {{csvPreview.length-20}} more rows</div>
                   </div>
                 </div>
+
+                <div v-if="importResult.invalid_center > 0 && importResult.skipped_centers.length" style="margin-top:16px;padding:14px 16px;border:1px solid #fecaca;background:#fef2f2;border-radius:10px;color:#991b1b;">
+                  <div style="font-weight:700;margin-bottom:6px;display:flex;align-items:center;gap:8px;">
+                    <i class="material-icons" style="font-size:18px">warning</i>
+                    Skipped center names found in CSV
+                  </div>
+                  <div style="font-size:13px;margin-bottom:8px;">
+                    These centers were not found in the center table. Add them first, then import the file again.
+                  </div>
+                  <div class="gap-12" style="row-gap:8px;">
+                    <span v-for="(centerName, idx) in importResult.skipped_centers" :key="'skip-center-'+idx" class="badge badge-red" style="background:#fee2e2;color:#991b1b;">
+                      {{centerName}}
+                    </span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -1593,6 +1615,158 @@
           </div>
         </div>
 
+        <!-- ═══ ARCHIVE & BACKUP ═══ -->
+        <div v-if="page==='archive'">
+          <!-- Create Archive Card -->
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title"><i class="material-icons">archive</i> Archive & Backup</div>
+            </div>
+            <div class="card-body">
+              <div style="background:#f0f9ff;border:1px solid #7dd3fc;border-radius:10px;padding:16px;margin-bottom:20px;">
+                <div style="display:flex;align-items:start;gap:12px;">
+                  <i class="material-icons" style="color:#0284c7;margin-top:2px">info</i>
+                  <div>
+                    <div style="font-weight:600;color:#0284c7;margin-bottom:4px">Create Post-Exam Archive</div>
+                    <div style="font-size:13px;color:#0369a1">Create a backup of the current database state with all results and candidate data, export results to Excel, and optionally clear tables to prepare for the next exam.</div>
+                  </div>
+                </div>
+              </div>
+
+              <div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:20px;">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+                  <div>
+                    <label class="form-label">Archive Name *</label>
+                    <input class="form-control" v-model="archiveName" placeholder="e.g., Exam_Q1_2026" style="padding:10px 12px;font-size:14px;">
+                  </div>
+                  <div>
+                    <label class="form-label">Results Count (Reference)</label>
+                    <input class="form-control" v-model="archiveRefCount" placeholder="Optional - number of results expected" style="padding:10px 12px;font-size:14px;" type="number">
+                  </div>
+                </div>
+
+                <div style="margin-bottom:16px;">
+                  <label class="form-label">Archive Notes</label>
+                  <textarea class="form-control" v-model="archiveNotes" placeholder="Add notes about this archive (exam details, batch info, etc.)" style="padding:10px 12px;font-size:13px;resize:vertical;min-height:80px;"></textarea>
+                </div>
+
+                <div style="margin-bottom:16px;display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                  <div style="padding:12px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                      <input type="checkbox" v-model="archiveIncludeClear" id="archiveClearCheck" style="width:16px;height:16px;cursor:pointer">
+                      <label for="archiveClearCheck" style="cursor:pointer;margin:0;font-weight:500;font-size:13px;">Clear tables after backup</label>
+                    </div>
+                  </div>
+                  <div style="padding:12px;background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                      <input type="checkbox" v-model="archiveCompress" id="archiveCompressCheck" style="width:16px;height:16px;cursor:pointer">
+                      <label for="archiveCompressCheck" style="cursor:pointer;margin:0;font-weight:500;font-size:13px;">Compress backup (saves space)</label>
+                    </div>
+                  </div>
+                </div>
+
+                <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                  <button class="btn btn-primary" @click="createArchive" :disabled="archiveCreating || !archiveName.trim()" style="min-width:180px">
+                    <i class="material-icons">archive</i> {{archiveCreating ? 'Creating...' : 'Create Archive'}}
+                  </button>
+                  <button class="btn btn-outline" @click="loadArchives">
+                    <i class="material-icons">refresh</i> Refresh
+                  </button>
+                </div>
+              </div>
+
+              <!-- Existing Archives -->
+              <div v-if="archiveList.length > 0">
+                <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:12px;">📦 Existing Archives ({{archiveList.length}})</div>
+                <div style="display:grid;gap:12px;">
+                  <div v-for="archive in archiveList" :key="archive.id" style="border:1px solid var(--border);border-radius:10px;padding:16px;background:#f8fafc;">
+                    <div style="display:flex;justify-content:space-between;align-items:start;">
+                      <div style="flex:1;">
+                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+                          <div style="font-weight:600;color:var(--primary);font-size:15px;">{{archive.archive_name}}</div>
+                          <span v-if="archive.is_compressed" class="badge" style="background:#10b981;color:white;font-size:11px;">Compressed</span>
+                        </div>
+                        <div style="font-size:12px;color:var(--muted);margin-bottom:8px;">
+                          📅 {{formatTime(archive.created_at)}} | 💾 {{archive.size_mb}}MB | 📊 {{archive.archived_count}} results
+                        </div>
+                        <div v-if="archive.notes" style="font-size:12px;background:#fff;border:1px solid #e5e7eb;border-radius:6px;padding:8px;color:#374151;">
+                          <strong>Notes:</strong> {{archive.notes}}
+                        </div>
+                      </div>
+                      <div style="display:flex;gap:6px;flex-direction:column;align-items:flex-end;">
+                        <button class="btn btn-sm btn-primary" @click="downloadArchiveBackup(archive, archiveCompress)" title="Download backup">
+                          <i class="material-icons" style="font-size:16px;">download</i>
+                        </button>
+                        <button class="btn btn-sm btn-outline" @click="showArchivePreview(archive)" title="View archive contents">
+                          <i class="material-icons" style="font-size:16px;">preview</i>
+                        </button>
+                        <button class="btn btn-sm btn-outline btn-danger" @click="deleteArchive(archive)" title="Delete">
+                          <i class="material-icons" style="font-size:16px;">delete</i>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div v-else style="text-align:center;padding:40px;color:var(--muted);">
+                <i class="material-icons" style="font-size:48px;display:block;margin-bottom:10px;color:#d1d5db">inventory_2</i>
+                <div style="font-size:14px;">No archives created yet</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Archive Preview Modal -->
+          <div v-if="archivePreviewModal.show" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:1000;">
+            <div style="background:white;border-radius:12px;max-width:600px;width:100%;max-height:80vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+              <div style="padding:20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:white;">
+                <h3 style="margin:0;font-size:18px;color:var(--text);">Archive Preview: {{archivePreviewModal.archive?.archive_name}}</h3>
+                <button @click="archivePreviewModal.show=false" style="background:none;border:none;cursor:pointer;font-size:24px;color:var(--muted);">×</button>
+              </div>
+              <div style="padding:20px;">
+                <div style="margin-bottom:16px;padding:12px;background:#f0f9ff;border-radius:8px;">
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px;">
+                    <div><strong>Database:</strong> {{archivePreviewModal.archive?.db_name}}</div>
+                    <div><strong>Results:</strong> {{archivePreviewModal.archive?.archived_count}}</div>
+                    <div><strong>Created:</strong> {{formatTime(archivePreviewModal.archive?.created_at)}}</div>
+                    <div><strong>Size:</strong> {{archivePreviewModal.archive?.size_mb}}MB</div>
+                  </div>
+                </div>
+
+                <div style="font-weight:600;margin-bottom:8px;font-size:14px;color:var(--text);">📊 Top 10 Results:</div>
+                <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;">
+                  <table style="width:100%;font-size:12px;border-collapse:collapse;">
+                    <thead style="background:#f3f4f6;border-bottom:1px solid var(--border);">
+                      <tr>
+                        <th style="padding:8px;text-align:left;">Roll No</th>
+                        <th style="padding:8px;text-align:left;">Name</th>
+                        <th style="padding:8px;text-align:center;">WPM</th>
+                        <th style="padding:8px;text-align:center;">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="result in archivePreviewModal.results" :key="result.id" style="border-bottom:1px solid #e5e7eb;">
+                        <td style="padding:8px;">{{result.roll_no}}</td>
+                        <td style="padding:8px;">{{result.name}}</td>
+                        <td style="padding:8px;text-align:center;font-weight:600;" :style="{color: result.wpm >= 45 ? '#10b981' : result.wpm >= 30 ? '#f59e0b' : '#ef4444'}">{{result.wpm}}</td>
+                        <td style="padding:8px;text-align:center;">
+                          <span :class="result.status === 'Passed' ? 'badge-green' : result.status === 'Failed' ? 'badge-red' : 'badge-orange'" style="padding:3px 8px;border-radius:4px;font-size:11px;font-weight:600;">{{result.status}}</span>
+                        </td>
+                      </tr>
+                      <tr v-if="archivePreviewModal.results.length === 0">
+                        <td colspan="4" style="padding:16px;text-align:center;color:var(--muted);">No results in this archive</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <div style="margin-top:16px;padding:12px;background:#fef3c7;border-radius:8px;font-size:12px;color:#7c2d12;">
+                  <strong>ℹ️</strong> This preview shows the first 10 results from the archive database. Download the full backup to see all data.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
       </div><!-- /content -->
     </div><!-- /main -->
   </template>
@@ -1640,8 +1814,21 @@ new Vue({
     quickCenter: '', sessionCenter: '', activeSession: null, newPassword: '',
     // CSV
     csvPreview: [], importCenter: '', isDrag: false, importing: false,
+    importResult: { inserted:0, skipped:0, invalid_center:0, skipped_centers:[] },
     // Tabs
     candidateTab: 'list',
+    // Archive & Backup
+    archiveList: [],
+    archives: [],
+    archiveName: '',
+    archiveNotes: '',
+    archiveRefCount: '',
+    archiveCreating: false,
+    archiveShowClearOptions: false,
+    archiveIncludeClear: false,
+    archiveCompress: false,
+    selectedArchiveForRestore: null,
+    archivePreviewModal: { show: false, archive: null, results: [] },
     // Auto-refresh
     refreshTimer: null,
     sidebarCollapsed: false,
@@ -1650,7 +1837,7 @@ new Vue({
   },
   computed: {
     pageTitle() {
-      return { dashboard:'Dashboard', analytics:'Analytics & Reports', candidates:'Candidates', paragraphs:'Paragraphs', typecodes:'Type Codes', centers:'Exam Centers', incharges:'Center Incharges', sessions:'Lab Sessions', results:'Test Results' }[this.page] || 'Admin';
+      return { dashboard:'Dashboard', analytics:'Analytics & Reports', candidates:'Candidates', paragraphs:'Paragraphs', typecodes:'Type Codes', centers:'Exam Centers', incharges:'Center Incharges', sessions:'Lab Sessions', results:'Test Results', archive:'Archive & Backup' }[this.page] || 'Admin';
     },
     currentDate() {
       return new Date().toLocaleString('en-PK', { dateStyle:'medium', timeStyle:'short' });
@@ -2230,6 +2417,7 @@ new Vue({
     parseCSV(file) {
       const reader = new FileReader();
       reader.onload = e => {
+        this.importResult = { inserted:0, skipped:0, invalid_center:0, skipped_centers:[] };
         const grid = this.parseCsvText(String(e.target.result || ''));
         if (!grid.length) {
           this.csvPreview = [];
@@ -2352,11 +2540,17 @@ new Vue({
       this.importing = true;
       this.post('import_candidates', { rows: this.csvPreview, default_center_id: this.importCenter || 0 }).then(r => {
         this.importing = false;
+        this.importResult = {
+          inserted: Number(r.inserted || 0),
+          skipped: Number(r.skipped || 0),
+          invalid_center: Number(r.invalid_center || 0),
+          skipped_centers: Array.isArray(r.skipped_centers) ? r.skipped_centers : []
+        };
         this.csvPreview = [];
         this.loadCandidates();
-        const invalid = Number(r.invalid_center || 0);
+        const invalid = this.importResult.invalid_center;
         const suffix = invalid > 0 ? `, ${invalid} skipped due to unknown center` : '';
-        this.showToast(`Imported ${r.inserted} candidates (${r.skipped} skipped${suffix})`);
+        this.showToast(`Imported ${this.importResult.inserted} candidates (${this.importResult.skipped} skipped${suffix})`);
       });
     },
 
@@ -2465,6 +2659,85 @@ new Vue({
       if (!dt) return '—';
       const d = new Date(dt);
       return d.toLocaleString('en-PK', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+    },
+
+    // ── ARCHIVE & BACKUP ──
+    loadArchives() {
+      this.get('get_archives').then(d => {
+        this.archiveList = Array.isArray(d) ? d : [];
+      }).catch(() => {
+        this.showToast('Could not load archives', 'warning');
+      });
+    },
+
+    createArchive() {
+      if (!this.archiveName.trim()) {
+        this.showToast('Please enter archive name', 'warning');
+        return;
+      }
+      this.archiveCreating = true;
+      this.post('create_archive', {
+        archive_name: this.archiveName.trim(),
+        notes: this.archiveNotes.trim(),
+        archived_count: parseInt(this.archiveRefCount) || 0,
+        include_clear: this.archiveIncludeClear ? 1 : 0,
+        compress: this.archiveCompress ? 1 : 0
+      }).then(r => {
+        this.archiveCreating = false;
+        if (r.status === 'ok') {
+          this.showToast(`Archive "${r.archive_name}" created successfully`);
+          this.archiveName = '';
+          this.archiveNotes = '';
+          this.archiveRefCount = '';
+          this.archiveIncludeClear = false;
+          this.archiveCompress = false;
+          this.loadArchives();
+        } else {
+          this.showToast(r.message || 'Could not create archive', 'warning');
+        }
+      }).catch(e => {
+        this.archiveCreating = false;
+        this.showToast('Archive creation failed: ' + (e.message || 'Unknown error'), 'warning');
+      });
+    },
+
+    downloadArchiveBackup(archive, compress=false) {
+      const compressionFlag = compress ? '&compress=1' : '';
+      window.location.href = `${API}?action=download_archive_backup&archive_id=${archive.id}${compressionFlag}`;
+      this.post('log_archive_activity', {
+        archive_id: archive.id,
+        action: 'download',
+        details: 'Downloaded archive backup' + (compress ? ' (compressed)' : '')
+      }).catch(() => {});
+    },
+
+    showArchivePreview(archive) {
+      this.archivePreviewModal.archive = archive;
+      this.archivePreviewModal.show = true;
+      this.get(`get_archive_preview&archive_id=${archive.id}`).then(d => {
+        this.archivePreviewModal.results = Array.isArray(d) ? d.slice(0, 10) : [];
+        this.post('log_archive_activity', {
+          archive_id: archive.id,
+          action: 'preview',
+          details: 'Viewed archive preview'
+        }).catch(() => {});
+      }).catch(() => {
+        this.showToast('Could not load preview', 'warning');
+      });
+    },
+
+    deleteArchive(archive) {
+      if (!confirm(`Delete archive "${archive.archive_name}"? This will drop the database "${archive.db_name}".`)) return;
+      this.post('delete_archive', { archive_id: archive.id }).then(r => {
+        if (r.status === 'ok') {
+          this.showToast(`Archive deleted`);
+          this.loadArchives();
+        } else {
+          this.showToast(r.message || 'Could not delete archive', 'warning');
+        }
+      }).catch(() => {
+        this.showToast('Delete failed', 'warning');
+      });
     },
   },
   mounted() {

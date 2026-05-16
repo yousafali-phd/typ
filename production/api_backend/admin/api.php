@@ -46,6 +46,9 @@ $stateChangingActions = [
     'delete_paragraph',
     'create_session',
     'expire_session',
+    'create_archive',
+    'delete_archive',
+    'log_archive_activity',
 ];
 
 if (in_array($action, $stateChangingActions, true) && $method !== 'POST') {
@@ -207,6 +210,22 @@ function resolve_center_assignment($row, $defaultCenterId = 0) {
     }
 
     return $center;
+}
+
+function center_label_from_row($row) {
+    $label = trim((string)row_value($row, 'center_name', ''));
+    if ($label !== '') return $label;
+
+    $label = trim((string)row_value($row, 'center_code', ''));
+    if ($label !== '') return $label;
+
+    $label = trim((string)row_value($row, 'center', ''));
+    if ($label !== '') return $label;
+
+    $label = trim((string)row_value($row, 'center_id', ''));
+    if ($label !== '') return $label;
+
+    return 'Unknown center';
 }
 
 function typing_root() {
@@ -807,6 +826,7 @@ switch ($action) {
         $ok   = 0;
         $skip = 0;
         $invalid_center = 0;
+        $skipped_centers = [];
 
         $has_post = users_column_exists('post');
         $has_center_code = users_column_exists('center_code');
@@ -828,6 +848,10 @@ switch ($action) {
             if (!$center) {
                 $skip++;
                 $invalid_center++;
+                $label = center_label_from_row($row);
+                if (!in_array($label, $skipped_centers, true)) {
+                    $skipped_centers[] = $label;
+                }
                 continue;
             }
 
@@ -863,7 +887,7 @@ switch ($action) {
             if ($ins && $mysqli->affected_rows > 0) $ok++;
             else $skip++;
         }
-        echo json_encode(["status" => "ok", "inserted" => $ok, "skipped" => $skip, "invalid_center" => $invalid_center]);
+        echo json_encode(["status" => "ok", "inserted" => $ok, "skipped" => $skip, "invalid_center" => $invalid_center, "skipped_centers" => $skipped_centers]);
         break;
 
     case 'reset_candidate':
@@ -1247,6 +1271,304 @@ switch ($action) {
             }
         }
         fclose($out);
+        break;
+
+    // -- ARCHIVE & BACKUP ----------------------------------------
+    case 'get_archives':
+        $res = $mysqli->query("
+            SELECT id, archive_name, db_name, created_at, 
+                   DATE_FORMAT(created_at, '%Y-%m-%d %H:%i') as created_at_formatted
+            FROM archives 
+            ORDER BY created_at DESC
+        ");
+        $archives = [];
+        if ($res) {
+            while ($row = $res->fetch_assoc()) {
+                $archives[] = $row;
+            }
+        }
+        echo json_encode($archives);
+        break;
+
+    case 'create_archive':
+        $d = req_body();
+        $archive_name = trim($d->archive_name ?? '');
+        $include_clear = intval($d->include_clear ?? 0);
+
+        if ($archive_name === '') {
+            echo json_encode(["status" => "fail", "message" => "Archive name is required"]);
+            break;
+        }
+
+        // Validate archive name (alphanumeric, underscore, hyphen only)
+        if (!preg_match('/^[a-zA-Z0-9_\-]+$/', $archive_name)) {
+            echo json_encode(["status" => "fail", "message" => "Archive name can only contain letters, numbers, underscores, and hyphens"]);
+            break;
+        }
+
+        // Construct new database name
+        $db_name = 'typing_archive_' . $archive_name;
+        $current_db = 'typing_local';
+
+        // Check if database already exists
+        $check_db = $mysqli->query("SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = '$db_name'");
+        if ($check_db && $check_db->num_rows > 0) {
+            echo json_encode(["status" => "fail", "message" => "Archive with this name already exists"]);
+            break;
+        }
+
+        // Create new database as a replica
+        $mysqli->query("CREATE DATABASE $db_name CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+
+        // Get list of all tables from current database
+        $tables_res = $mysqli->query("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA='$current_db'");
+        
+        if (!$tables_res) {
+            $mysqli->query("DROP DATABASE $db_name");
+            echo json_encode(["status" => "fail", "message" => "Failed to retrieve tables"]);
+            break;
+        }
+
+        $tables = [];
+        while ($row = $tables_res->fetch_assoc()) {
+            $tables[] = $row['TABLE_NAME'];
+        }
+
+        // Copy all tables to the new database
+        foreach ($tables as $table) {
+            $create_sql = $mysqli->query("SHOW CREATE TABLE $current_db.$table")->fetch_assoc();
+            if ($create_sql) {
+                $create_table = $create_sql['Create Table'];
+                // Adjust the table name for the new database
+                $create_table = str_replace("CREATE TABLE `$table`", "CREATE TABLE `$table`", $create_table);
+                $mysqli->query("USE $db_name");
+                $mysqli->query($create_table);
+                $mysqli->query("USE $current_db");
+
+                // Copy data from original table
+                $mysqli->query("INSERT INTO $db_name.$table SELECT * FROM $current_db.$table");
+            }
+        }
+
+        // Add archive record to archives table
+        $admin_id = intval($_SESSION['admin_id'] ?? 0);
+        $notes = trim($d->notes ?? '');
+        $archived_count = intval($d->archived_count ?? 0);
+        $compress = intval($d->compress ?? 0);
+        
+        $notes = $mysqli->real_escape_string($notes);
+        $mysqli->query("INSERT INTO archives (archive_name, db_name, created_at, created_by, notes, archived_count, is_compressed) 
+                      VALUES ('$archive_name', '$db_name', NOW(), '$admin_id', '$notes', '$archived_count', '$compress')");
+        $archive_id = $mysqli->insert_id;
+
+        // If include_clear is set, clear the specified tables
+        if ($include_clear) {
+            $tables_to_clear = [
+                'candidate_center_change_logs',
+                'lab_sessions',
+                'live_candidates',
+                'results',
+                'retest_logs',
+                'users'
+            ];
+
+            foreach ($tables_to_clear as $table) {
+                $mysqli->query("TRUNCATE TABLE $current_db.$table");
+            }
+        }
+
+        echo json_encode([
+            "status" => "ok",
+            "archive_id" => $archive_id,
+            "archive_name" => $archive_name,
+            "db_name" => $db_name,
+            "message" => "Archive created successfully" . ($include_clear ? " and tables cleared" : "")
+        ]);
+        break;
+
+    case 'download_archive_backup':
+        $archive_id = intval($_GET['archive_id'] ?? 0);
+        if ($archive_id <= 0) {
+            http_response_code(400);
+            echo "Invalid archive ID";
+            exit;
+        }
+
+        $archive_q = $mysqli->query("SELECT archive_name, db_name FROM archives WHERE id='$archive_id' LIMIT 1");
+        if (!$archive_q || $archive_q->num_rows === 0) {
+            http_response_code(404);
+            echo "Archive not found";
+            exit;
+        }
+
+        $archive = $archive_q->fetch_assoc();
+        $archive_name = $archive['archive_name'];
+        $db_name = $archive['db_name'];
+
+        // Get results for Excel export
+        $results_query = "SELECT r.id, r.roll_no, u.name, u.cnic, c.name as center_name, c.code as center_code, 
+                                r.correct_words, r.incorrect_words, r.wpm, r.accuracy, r.time, r.date,
+                                CASE
+                                    WHEN COALESCE(u.wpm_required, 0) > 0 AND r.wpm >= u.wpm_required THEN 'Passed'
+                                    WHEN COALESCE(u.wpm_required, 0) > 0 THEN 'Failed'
+                                    ELSE '—'
+                                END as status
+                         FROM {$db_name}.results r
+                         LEFT JOIN {$db_name}.users u ON u.id=r.uid
+                         LEFT JOIN {$db_name}.centers c ON c.id=r.center_id
+                         ORDER BY r.date DESC";
+
+        $res = $mysqli->query($results_query);
+
+        // Create temp directory
+        $temp_dir = sys_get_temp_dir() . '/archive_' . uniqid();
+        if (!mkdir($temp_dir)) {
+            http_response_code(500);
+            echo "Failed to create temporary directory";
+            exit;
+        }
+
+        // Export results to CSV
+        $csv_file = $temp_dir . '/results.csv';
+        $fp = fopen($csv_file, 'w');
+        fputcsv($fp, ["Result ID", "Roll No", "Candidate Name", "CNIC", "Center Code", "Center Name", "Status", "Correct Words", "Incorrect Words", "WPM", "Accuracy", "Time", "Date"]);
+        
+        if ($res) {
+            while ($row = $res->fetch_assoc()) {
+                fputcsv($fp, [
+                    $row['id'],
+                    $row['roll_no'],
+                    $row['name'],
+                    $row['cnic'],
+                    $row['center_code'],
+                    $row['center_name'],
+                    $row['status'],
+                    $row['correct_words'],
+                    $row['incorrect_words'],
+                    $row['wpm'],
+                    $row['accuracy'],
+                    $row['time'],
+                    $row['date']
+                ]);
+            }
+        }
+        fclose($fp);
+
+        // Create SQL dump
+        $sql_file = $temp_dir . '/database_backup.sql';
+        $cmd = sprintf("mysqldump -u %s %s %s > %s", 
+            "root",
+            "",
+            $db_name,
+            $sql_file
+        );
+        shell_exec($cmd);
+
+        // Create ZIP file
+        $zip_file = $temp_dir . '/' . $archive_name . '_backup.zip';
+        $zip = new ZipArchive();
+        $zip->open($zip_file, ZipArchive::CREATE);
+        $zip->addFile($csv_file, 'results.csv');
+        $zip->addFile($sql_file, 'database_backup.sql');
+        $zip->close();
+
+        // Send ZIP file to client
+        header('Content-Type: application/zip');
+        header('Content-Disposition: attachment; filename="' . $archive_name . '_backup.zip"');
+        header('Content-Length: ' . filesize($zip_file));
+        readfile($zip_file);
+
+        // Cleanup
+        unlink($csv_file);
+        unlink($sql_file);
+        unlink($zip_file);
+        rmdir($temp_dir);
+        exit;
+        break;
+
+    case 'delete_archive':
+        $d = req_body();
+        $archive_id = intval($d->archive_id ?? 0);
+
+        if ($archive_id <= 0) {
+            echo json_encode(["status" => "fail", "message" => "Invalid archive ID"]);
+            break;
+        }
+
+        $archive_q = $mysqli->query("SELECT db_name FROM archives WHERE id='$archive_id' LIMIT 1");
+        if (!$archive_q || $archive_q->num_rows === 0) {
+            echo json_encode(["status" => "fail", "message" => "Archive not found"]);
+            break;
+        }
+
+        $archive = $archive_q->fetch_assoc();
+        $db_name = $archive['db_name'];
+
+        // Drop the database
+        $mysqli->query("DROP DATABASE IF EXISTS $db_name");
+
+        // Delete archive record
+        $mysqli->query("DELETE FROM archives WHERE id='$archive_id'");
+
+        echo json_encode(["status" => "ok", "message" => "Archive deleted"]);
+        break;
+
+    case 'get_archive_preview':
+        $archive_id = intval($_GET['archive_id'] ?? 0);
+        if ($archive_id <= 0) {
+            echo json_encode(["status" => "fail", "message" => "Invalid archive ID"]);
+            break;
+        }
+
+        $archive_q = $mysqli->query("SELECT db_name FROM archives WHERE id='$archive_id' LIMIT 1");
+        if (!$archive_q || $archive_q->num_rows === 0) {
+            echo json_encode([]);
+            break;
+        }
+
+        $archive = $archive_q->fetch_assoc();
+        $db_name = $archive['db_name'];
+
+        // Get top 10 results from archive database
+        $results_q = $mysqli->query("
+            SELECT r.id, r.roll_no, u.name, r.wpm,
+                   CASE
+                       WHEN COALESCE(u.wpm_required, 0) > 0 AND r.wpm >= u.wpm_required THEN 'Passed'
+                       WHEN COALESCE(u.wpm_required, 0) > 0 THEN 'Failed'
+                       ELSE '—'
+                   END as status
+            FROM $db_name.results r
+            LEFT JOIN $db_name.users u ON u.id=r.uid
+            ORDER BY r.date DESC
+            LIMIT 10
+        ");
+
+        $results = [];
+        if ($results_q) {
+            while ($r = $results_q->fetch_assoc()) {
+                $results[] = $r;
+            }
+        }
+        echo json_encode($results);
+        break;
+
+    case 'log_archive_activity':
+        $d = req_body();
+        $archive_id = intval($d->archive_id ?? 0);
+        $action = trim($d->action ?? '');
+        $details = trim($d->details ?? '');
+        $admin_id = intval($_SESSION['admin_id'] ?? 0);
+
+        if ($archive_id <= 0 || $action === '') {
+            echo json_encode(["status" => "fail"]);
+            break;
+        }
+
+        $details = $mysqli->real_escape_string($details);
+        $mysqli->query("INSERT INTO archive_logs (archive_id, admin_id, action, details, created_at)
+                      VALUES ('$archive_id', '$admin_id', '$action', '$details', NOW())");
+        
+        echo json_encode(["status" => "ok"]);
         break;
 
     default:
