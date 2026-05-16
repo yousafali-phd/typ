@@ -169,7 +169,7 @@ echo "<div class='box'>";
 echo "<h3>7️⃣ Setup Checklist</h3>";
 echo "<ol style='line-height:1.8'>";
 echo "<li>✅ All API files now use correct mysqli.php path (FIXED)</li>";
-echo "<li>Ensure database 'typing_local' exists in phpMyAdmin</li>";
+echo "<li>Ensure database 'typing_april_12' exists in phpMyAdmin</li>";
 echo "<li>Run setup_database.sql to create all tables</li>";
 echo "<li>Create centers in admin panel or via SQL</li>";
 echo "<li>Create lab session with password from admin panel</li>";

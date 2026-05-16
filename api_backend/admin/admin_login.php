@@ -19,7 +19,7 @@ header("Pragma: no-cache");
 header("Expires: 0");
 require_once("../../api_backend/mysqli.php");
 
-$data = json_decode(file_get_contents("php://input"));
+    $data = json_decode(file_get_contents("php://input"));
 if (!is_object($data)) {
     echo json_encode(["status" => "fail"]);
     exit;
@@ -28,7 +28,7 @@ if (!is_object($data)) {
 $username = $mysqli->real_escape_string(trim($data->username ?? ''));
 $password_raw = trim($data->password ?? '');
 
-$q = $mysqli->query("SELECT * FROM admins WHERE username='$username' AND is_active=1 LIMIT 1");
+    $q = $mysqli->query("SELECT * FROM admins WHERE username='$username' AND is_active=1 LIMIT 1");
 if (!$q || $q->num_rows == 0) {
     echo json_encode(["status" => "fail"]);
     exit;

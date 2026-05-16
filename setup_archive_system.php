@@ -1,7 +1,7 @@
 <?php
 /**
  * Archive System Setup Script
- * This script creates the required archives table and initializes the archive system
+ * This script creates the archive metadata table used for backup records
  */
 
 require_once("api_backend/mysqli.php");
@@ -9,13 +9,13 @@ require_once("api_backend/mysqli.php");
 // Check if archives table exists
 $check_table = $mysqli->query("
     SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES 
-    WHERE TABLE_SCHEMA='typing_local' AND TABLE_NAME='archives'
+    WHERE TABLE_SCHEMA='typing_april_12' AND TABLE_NAME='archives'
 ");
 
 if ($check_table && $check_table->num_rows > 0) {
     $status = '<div style="background:#d1fae5;border:1px solid #10b981;color:#065f46;padding:16px;border-radius:8px;margin:20px;">
         <h3 style="margin:0 0 8px 0">✓ Archive System Already Setup</h3>
-        <p style="margin:0">The archives table already exists in your database.</p>
+        <p style="margin:0">The archive metadata table already exists in your database.</p>
     </div>';
 } else {
     // Create the archives table
@@ -23,20 +23,20 @@ if ($check_table && $check_table->num_rows > 0) {
         CREATE TABLE IF NOT EXISTS `archives` (
           `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
           `archive_name` VARCHAR(255) NOT NULL UNIQUE,
-          `db_name` VARCHAR(255) NOT NULL UNIQUE COMMENT 'Database name like typing_archive_Q1_2026',
+          `db_name` VARCHAR(255) NOT NULL UNIQUE COMMENT 'Backup key like backup_20260516_Exam_Q1_2026',
           `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
           `created_by` INT UNSIGNED,
           `status` VARCHAR(50) DEFAULT 'active' COMMENT 'active, archived, deleted',
           INDEX `idx_created_at` (`created_at`),
           INDEX `idx_archive_name` (`archive_name`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-          COMMENT='Archive metadata table to track database backups and replicas'
+          COMMENT='Archive metadata table to track backup records and restore files'
     ");
 
     if ($create_result) {
         $status = '<div style="background:#d1fae5;border:1px solid #10b981;color:#065f46;padding:16px;border-radius:8px;margin:20px;">
             <h3 style="margin:0 0 8px 0">✓ Archive System Setup Complete</h3>
-            <p style="margin:0">The archives table has been created successfully. You can now use the Archive & Backup feature in the admin dashboard.</p>
+            <p style="margin:0">The archive metadata table has been created successfully. You can now use the Archive & Backup feature in the admin dashboard.</p>
         </div>';
     } else {
         $status = '<div style="background:#fee2e2;border:1px solid #ef4444;color:#7f1d1d;padding:16px;border-radius:8px;margin:20px;">

@@ -1,6 +1,6 @@
 # Typing Test Project Master Documentation
 
-Last Updated: 2026-05-14
+Last Updated: 2026-05-16
 Owner: Project Team
 Applies To: Entire project under C:\wamp64\www\typing
 
@@ -25,7 +25,7 @@ Core Modules:
 - Admin Dashboard: center, candidates, sessions, analytics, results, settings, and center incharge assignment in admin/index.html.
 - Center Incharge Portal: restricted center dashboard in center/index.html.
 - API Layer: PHP endpoints in api_backend, api_backend/admin, and api_backend/center.
-- Database: MySQL database typing_local.
+- Database: MySQL database typing_april_12 (configured in api_backend/mysqli.php).
 
 Primary Goal:
 - Conduct center-wise typing tests with session-password-based login and one-attempt controls.
@@ -107,7 +107,7 @@ Center Incharge Frontend:
 5) Database Details
 ------------------------------------------------------------
 Database Name:
-- typing_local
+- typing_april_12 (default, configured via DB_NAME environment variable or as fallback in api_backend/mysqli.php)
 
 Connection:
 - Host: localhost
@@ -390,7 +390,7 @@ What these verify:
 10) Setup And Initialization
 ------------------------------------------------------------
 Recommended order on fresh or repaired environment:
-1. Create database typing_local.
+1. Create database typing_april_12 (or configure via DB_NAME environment variable).
 2. Run setup_database.sql.
 3. Run update_database.sql.
 4. Run quick_test_data.sql (for test environment).
@@ -518,6 +518,13 @@ Also revise impacted sections above (flow, API, DB, troubleshooting).
 - Added candidate image rendering in candidate logged-in UI and result card preview screens.
 - Updated candidate login API response to include resolved center_name/center_code from centers mapping.
 - Mirrored runtime updates to production copies under production/ for deployment parity.
+
+2026-05-16
+- Reworked archive handling to stop creating per-archive databases and instead save one archive metadata row plus generated backup files.
+- Split backup downloads into separate Excel result export and SQL restore ZIP download actions.
+- Kept clear-data as an archive option after backup generation.
+- Updated admin dashboard and production mirror to match the new archive flow.
+- Validation: PHP syntax checks passed for both admin API mirrors.
 - Validation: php -l passed for updated api_backend/admin/api.php and api_backend/login.php in both root and production; VS Code problems check reported no errors in touched HTML/SQL/PHP files.
 
 2026-04-24
@@ -532,10 +539,15 @@ Also revise impacted sections above (flow, API, DB, troubleshooting).
 - index.html now sends both type and uid when requesting paragraph content.
 - Mirrored same fix to production/api_backend/get_paragraph.php and production/index.html.
 
+2026-05-16
+- Fixed archive creation endpoint (create_archive) which was using hardcoded database name 'typing_april_12'.
+- Updated to use configured database name from environment (DB_NAME) or fallback to 'typing_april_12'.
+- Also replaced mysqldump with pure PHP SQL generation for better Windows compatibility.
+- Applied fix to both root and production API files.
+
 2026-04-24
-- Reconfirmed the root/local environment uses database typing_april_12 in api_backend/mysqli.php.
-- Note: setup scripts, diagnostics, and production references still mention typing_local, so local environment-specific DB naming must be verified before applying DB config changes.
-- Validation: reviewed root DB config and restored local default connection target.
+- Reconfirmed the local environment uses database typing_april_12 in api_backend/mysqli.php.
+- Note: setup scripts, diagnostics, and production references have been corrected to use typing_april_12.
 
 2026-04-24
 - Fixed admin session restore failure for the local typing_april_12 database.

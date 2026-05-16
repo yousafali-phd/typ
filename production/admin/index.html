@@ -1628,7 +1628,7 @@
                   <i class="material-icons" style="color:#0284c7;margin-top:2px">info</i>
                   <div>
                     <div style="font-weight:600;color:#0284c7;margin-bottom:4px">Create Post-Exam Archive</div>
-                    <div style="font-size:13px;color:#0369a1">Create a backup of the current database state with all results and candidate data, export results to Excel, and optionally clear tables to prepare for the next exam.</div>
+                    <div style="font-size:13px;color:#0369a1">Create an archive record, save the Excel results file and SQL restore backup, and optionally clear tables to prepare for the next exam.</div>
                   </div>
                 </div>
               </div>
@@ -1650,18 +1650,10 @@
                   <textarea class="form-control" v-model="archiveNotes" placeholder="Add notes about this archive (exam details, batch info, etc.)" style="padding:10px 12px;font-size:13px;resize:vertical;min-height:80px;"></textarea>
                 </div>
 
-                <div style="margin-bottom:16px;display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-                  <div style="padding:12px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;">
-                    <div style="display:flex;align-items:center;gap:8px;">
-                      <input type="checkbox" v-model="archiveIncludeClear" id="archiveClearCheck" style="width:16px;height:16px;cursor:pointer">
-                      <label for="archiveClearCheck" style="cursor:pointer;margin:0;font-weight:500;font-size:13px;">Clear tables after backup</label>
-                    </div>
-                  </div>
-                  <div style="padding:12px;background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;">
-                    <div style="display:flex;align-items:center;gap:8px;">
-                      <input type="checkbox" v-model="archiveCompress" id="archiveCompressCheck" style="width:16px;height:16px;cursor:pointer">
-                      <label for="archiveCompressCheck" style="cursor:pointer;margin:0;font-weight:500;font-size:13px;">Compress backup (saves space)</label>
-                    </div>
+                <div style="margin-bottom:16px;padding:12px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;">
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <input type="checkbox" v-model="archiveIncludeClear" id="archiveClearCheck" style="width:16px;height:16px;cursor:pointer">
+                    <label for="archiveClearCheck" style="cursor:pointer;margin:0;font-weight:500;font-size:13px;">Clear tables after archive and backup</label>
                   </div>
                 </div>
 
@@ -1684,18 +1676,21 @@
                       <div style="flex:1;">
                         <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
                           <div style="font-weight:600;color:var(--primary);font-size:15px;">{{archive.archive_name}}</div>
-                          <span v-if="archive.is_compressed" class="badge" style="background:#10b981;color:white;font-size:11px;">Compressed</span>
+                          <span v-if="archive.status" class="badge" style="background:#64748b;color:white;font-size:11px;">{{archive.status}}</span>
                         </div>
                         <div style="font-size:12px;color:var(--muted);margin-bottom:8px;">
-                          📅 {{formatTime(archive.created_at)}} | 💾 {{archive.size_mb}}MB | 📊 {{archive.archived_count}} results
+                          📅 {{formatTime(archive.created_at)}} | 📊 {{archive.archived_count}} results
                         </div>
                         <div v-if="archive.notes" style="font-size:12px;background:#fff;border:1px solid #e5e7eb;border-radius:6px;padding:8px;color:#374151;">
                           <strong>Notes:</strong> {{archive.notes}}
                         </div>
                       </div>
                       <div style="display:flex;gap:6px;flex-direction:column;align-items:flex-end;">
-                        <button class="btn btn-sm btn-primary" @click="downloadArchiveBackup(archive, archiveCompress)" title="Download backup">
-                          <i class="material-icons" style="font-size:16px;">download</i>
+                        <button class="btn btn-sm btn-primary" @click="downloadArchiveExcel(archive)" title="Download Excel result">
+                          <i class="material-icons" style="font-size:16px;">grid_on</i>
+                        </button>
+                        <button class="btn btn-sm btn-primary" @click="downloadArchiveSql(archive)" title="Download SQL restore zip">
+                          <i class="material-icons" style="font-size:16px;">backup</i>
                         </button>
                         <button class="btn btn-sm btn-outline" @click="showArchivePreview(archive)" title="View archive contents">
                           <i class="material-icons" style="font-size:16px;">preview</i>
@@ -1725,10 +1720,10 @@
               <div style="padding:20px;">
                 <div style="margin-bottom:16px;padding:12px;background:#f0f9ff;border-radius:8px;">
                   <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px;">
-                    <div><strong>Database:</strong> {{archivePreviewModal.archive?.db_name}}</div>
+                    <div><strong>Backup Key:</strong> {{archivePreviewModal.archive?.db_name}}</div>
                     <div><strong>Results:</strong> {{archivePreviewModal.archive?.archived_count}}</div>
                     <div><strong>Created:</strong> {{formatTime(archivePreviewModal.archive?.created_at)}}</div>
-                    <div><strong>Size:</strong> {{archivePreviewModal.archive?.size_mb}}MB</div>
+                    <div><strong>Status:</strong> {{archivePreviewModal.archive?.status || 'ready'}}</div>
                   </div>
                 </div>
 
@@ -1826,7 +1821,6 @@ new Vue({
     archiveCreating: false,
     archiveShowClearOptions: false,
     archiveIncludeClear: false,
-    archiveCompress: false,
     selectedArchiveForRestore: null,
     archivePreviewModal: { show: false, archive: null, results: [] },
     // Auto-refresh
@@ -2007,8 +2001,11 @@ new Vue({
     },
     post(action, data) {
       return this.$http.post(`${API}?action=${action}`, JSON.stringify(data)).then(r => {
-        const body = r.body;
-        if (body && body.status === 'unauthorized') {
+        const body = r && r.body ? r.body : null;
+        if (!body) {
+          return Promise.reject(new Error('Empty response from server'));
+        }
+        if (body.status === 'unauthorized') {
           this.forceLogout();
           return Promise.reject(new Error('unauthorized'));
         }
@@ -2680,17 +2677,19 @@ new Vue({
         archive_name: this.archiveName.trim(),
         notes: this.archiveNotes.trim(),
         archived_count: parseInt(this.archiveRefCount) || 0,
-        include_clear: this.archiveIncludeClear ? 1 : 0,
-        compress: this.archiveCompress ? 1 : 0
+        include_clear: this.archiveIncludeClear ? 1 : 0
       }).then(r => {
         this.archiveCreating = false;
+        if (!r || typeof r !== 'object') {
+          this.showToast('Could not create archive: invalid server response', 'warning');
+          return;
+        }
         if (r.status === 'ok') {
           this.showToast(`Archive "${r.archive_name}" created successfully`);
           this.archiveName = '';
           this.archiveNotes = '';
           this.archiveRefCount = '';
           this.archiveIncludeClear = false;
-          this.archiveCompress = false;
           this.loadArchives();
         } else {
           this.showToast(r.message || 'Could not create archive', 'warning');
@@ -2701,14 +2700,28 @@ new Vue({
       });
     },
 
-    downloadArchiveBackup(archive, compress=false) {
-      const compressionFlag = compress ? '&compress=1' : '';
-      window.location.href = `${API}?action=download_archive_backup&archive_id=${archive.id}${compressionFlag}`;
+    downloadArchiveExcel(archive) {
       this.post('log_archive_activity', {
         archive_id: archive.id,
-        action: 'download',
-        details: 'Downloaded archive backup' + (compress ? ' (compressed)' : '')
-      }).catch(() => {});
+        action: 'download_excel',
+        details: 'Downloaded Excel result backup'
+      }).then(() => {
+        window.location.href = `${API}?action=download_archive_excel&archive_id=${archive.id}`;
+      }).catch(() => {
+        window.location.href = `${API}?action=download_archive_excel&archive_id=${archive.id}`;
+      });
+    },
+
+    downloadArchiveSql(archive) {
+      this.post('log_archive_activity', {
+        archive_id: archive.id,
+        action: 'download_sql',
+        details: 'Downloaded SQL restore backup'
+      }).then(() => {
+        window.location.href = `${API}?action=download_archive_sql&archive_id=${archive.id}`;
+      }).catch(() => {
+        window.location.href = `${API}?action=download_archive_sql&archive_id=${archive.id}`;
+      });
     },
 
     showArchivePreview(archive) {
@@ -2727,7 +2740,7 @@ new Vue({
     },
 
     deleteArchive(archive) {
-      if (!confirm(`Delete archive "${archive.archive_name}"? This will drop the database "${archive.db_name}".`)) return;
+      if (!confirm(`Delete archive "${archive.archive_name}"? This will remove the saved backup files and archive record.`)) return;
       this.post('delete_archive', { archive_id: archive.id }).then(r => {
         if (r.status === 'ok') {
           this.showToast(`Archive deleted`);

@@ -56,7 +56,7 @@ typing/
 
 1. Copy the project folder into your web server directory, for example `C:\wamp64\www\typing`.
 2. Start Apache and MySQL from WAMP.
-3. Create a database named `typing_local`.
+3. Create a database named `typing_april_12`.
 4. Import the schema using `setup_database.sql`.
 5. Apply `update_database.sql` if your local database needs the latest columns and fixes.
 6. Optionally import `quick_test_data.sql` to load sample centers, candidates, and sessions.
@@ -68,7 +68,7 @@ Database connection settings are managed in `api_backend/mysqli.php`.
 Typical local setup:
 
 - Host: `localhost`
-- Database: `typing_local`
+- Database: `typing_april_12`
 - Username: `root`
 - Password: empty for default WAMP installs
 

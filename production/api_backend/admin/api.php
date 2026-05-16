@@ -225,6 +225,163 @@ function center_label_from_row($row) {
     $label = trim((string)row_value($row, 'center_id', ''));
     if ($label !== '') return $label;
 
+function archive_storage_root() {
+    $root = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'archive_backups';
+    if (!is_dir($root)) {
+        @mkdir($root, 0775, true);
+    }
+    return $root;
+}
+
+function archive_safe_slug($value) {
+    $value = strtolower(trim((string)$value));
+    $value = preg_replace('/[^a-z0-9_\-]+/i', '_', $value);
+    $value = trim((string)$value, '_');
+    return $value !== '' ? $value : 'archive';
+}
+
+function archive_results_query() {
+    global $mysqli;
+    return $mysqli->query("SELECT r.id, r.roll_no, u.name, u.cnic, c.name as center_name, c.code as center_code, r.correct_words, r.incorrect_words, r.wpm, r.accuracy, r.time, r.date,
+                              CASE
+                                  WHEN COALESCE(u.wpm_required, 0) > 0 AND r.wpm >= u.wpm_required THEN 'Passed'
+                                  WHEN COALESCE(u.wpm_required, 0) > 0 THEN 'Failed'
+                                  ELSE '—'
+                              END as status
+                              FROM results r
+                              LEFT JOIN users u ON u.id=r.uid
+                              LEFT JOIN centers c ON c.id=r.center_id
+                              ORDER BY r.date DESC");
+}
+
+function archive_export_results_file($filePath) {
+    $res = archive_results_query();
+    $fp = fopen($filePath, 'w');
+    if (!$fp) {
+        return false;
+    }
+
+    fputcsv($fp, ["Result ID", "Roll No", "Candidate Name", "CNIC", "Center Code", "Center Name", "Status", "Correct Words", "Incorrect Words", "WPM", "Accuracy", "Time", "Date"], "\t");
+    if ($res) {
+        while ($row = $res->fetch_assoc()) {
+            fputcsv($fp, [
+                $row['id'],
+                $row['roll_no'],
+                $row['name'],
+                $row['cnic'],
+                $row['center_code'],
+                $row['center_name'],
+                $row['status'],
+                $row['correct_words'],
+                $row['incorrect_words'],
+                $row['wpm'],
+                $row['accuracy'],
+                $row['time'],
+                $row['date']
+            ], "\t");
+        }
+    }
+    fclose($fp);
+    return true;
+}
+
+function archive_generate_sql_zip($dbName, $zipFile) {
+    global $mysqli;
+    $sqlFile = preg_replace('/\.zip$/i', '.sql', $zipFile);
+    
+    // Generate SQL dump using PHP instead of mysqldump for better Windows compatibility
+    $fp = fopen($sqlFile, 'w');
+    if (!$fp) {
+        return false;
+    }
+    
+    fwrite($fp, "-- SQL Backup for database: $dbName\n");
+    fwrite($fp, "-- Generated: " . date('Y-m-d H:i:s') . "\n\n");
+    
+    // Get all tables
+    $result = $mysqli->query("SHOW TABLES FROM `$dbName`");
+    if (!$result) {
+        fclose($fp);
+        return false;
+    }
+    
+    while ($row = $result->fetch_row()) {
+        $table = $row[0];
+        
+        // Get CREATE TABLE statement
+        $createResult = $mysqli->query("SHOW CREATE TABLE `$dbName`.`$table`");
+        if ($createResult) {
+            $createRow = $createResult->fetch_row();
+            fwrite($fp, "DROP TABLE IF EXISTS `$table`;\n");
+            fwrite($fp, $createRow[1] . ";\n\n");
+        }
+    }
+    
+    fclose($fp);
+    
+    if (!file_exists($sqlFile) || filesize($sqlFile) === 0) {
+        if (file_exists($sqlFile)) {
+            @unlink($sqlFile);
+        }
+        return false;
+    }
+    
+    // Create ZIP archive
+    $zip = new ZipArchive();
+    if ($zip->open($zipFile, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+        @unlink($sqlFile);
+        return false;
+    }
+    $zip->addFile($sqlFile, basename($sqlFile));
+    $zip->close();
+    @unlink($sqlFile);
+    
+    return file_exists($zipFile) && filesize($zipFile) > 0;
+}
+
+function archive_stream_file($filePath, $downloadName, $contentType) {
+    if (!file_exists($filePath) || !is_file($filePath)) {
+        return false;
+    }
+
+    header('Content-Type: ' . $contentType);
+    header('Content-Disposition: attachment; filename="' . $downloadName . '"');
+    header('Content-Length: ' . filesize($filePath));
+    readfile($filePath);
+    return true;
+}
+
+function archive_delete_path($path) {
+    if (!file_exists($path)) {
+        return;
+    }
+    if (is_file($path)) {
+        @unlink($path);
+        return;
+    }
+
+    $items = scandir($path);
+    if ($items === false) {
+        return;
+    }
+    foreach ($items as $item) {
+        if ($item === '.' || $item === '..') {
+            continue;
+        }
+        archive_delete_path($path . DIRECTORY_SEPARATOR . $item);
+    }
+    @rmdir($path);
+}
+
+function archive_locate_folder($archiveRow) {
+    $backupKey = trim((string)row_value($archiveRow, 'db_name', ''));
+    if ($backupKey === '') {
+        return null;
+    }
+    $folder = archive_storage_root() . DIRECTORY_SEPARATOR . $backupKey;
+    return is_dir($folder) ? $folder : null;
+}
+
     return 'Unknown center';
 }
 
@@ -1276,7 +1433,7 @@ switch ($action) {
     // -- ARCHIVE & BACKUP ----------------------------------------
     case 'get_archives':
         $res = $mysqli->query("
-            SELECT id, archive_name, db_name, created_at, 
+            SELECT id, archive_name, db_name, created_at, notes, archived_count, status,
                    DATE_FORMAT(created_at, '%Y-%m-%d %H:%i') as created_at_formatted
             FROM archives 
             ORDER BY created_at DESC
@@ -1291,102 +1448,193 @@ switch ($action) {
         break;
 
     case 'create_archive':
-        $d = req_body();
-        $archive_name = trim($d->archive_name ?? '');
-        $include_clear = intval($d->include_clear ?? 0);
-
-        if ($archive_name === '') {
-            echo json_encode(["status" => "fail", "message" => "Archive name is required"]);
-            break;
-        }
-
-        // Validate archive name (alphanumeric, underscore, hyphen only)
-        if (!preg_match('/^[a-zA-Z0-9_\-]+$/', $archive_name)) {
-            echo json_encode(["status" => "fail", "message" => "Archive name can only contain letters, numbers, underscores, and hyphens"]);
-            break;
-        }
-
-        // Construct new database name
-        $db_name = 'typing_archive_' . $archive_name;
-        $current_db = 'typing_local';
-
-        // Check if database already exists
-        $check_db = $mysqli->query("SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = '$db_name'");
-        if ($check_db && $check_db->num_rows > 0) {
-            echo json_encode(["status" => "fail", "message" => "Archive with this name already exists"]);
-            break;
-        }
-
-        // Create new database as a replica
-        $mysqli->query("CREATE DATABASE $db_name CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
-
-        // Get list of all tables from current database
-        $tables_res = $mysqli->query("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA='$current_db'");
-        
-        if (!$tables_res) {
-            $mysqli->query("DROP DATABASE $db_name");
-            echo json_encode(["status" => "fail", "message" => "Failed to retrieve tables"]);
-            break;
-        }
-
-        $tables = [];
-        while ($row = $tables_res->fetch_assoc()) {
-            $tables[] = $row['TABLE_NAME'];
-        }
-
-        // Copy all tables to the new database
-        foreach ($tables as $table) {
-            $create_sql = $mysqli->query("SHOW CREATE TABLE $current_db.$table")->fetch_assoc();
-            if ($create_sql) {
-                $create_table = $create_sql['Create Table'];
-                // Adjust the table name for the new database
-                $create_table = str_replace("CREATE TABLE `$table`", "CREATE TABLE `$table`", $create_table);
-                $mysqli->query("USE $db_name");
-                $mysqli->query($create_table);
-                $mysqli->query("USE $current_db");
-
-                // Copy data from original table
-                $mysqli->query("INSERT INTO $db_name.$table SELECT * FROM $current_db.$table");
+        try {
+            $d = req_body();
+            
+            if (!is_object($d)) {
+                http_response_code(400);
+                echo json_encode(["status" => "fail", "message" => "Invalid request body"]);
+                exit;
             }
-        }
+            
+            $archive_name = trim($d->archive_name ?? '');
+            $include_clear = intval($d->include_clear ?? 0);
 
-        // Add archive record to archives table
-        $admin_id = intval($_SESSION['admin_id'] ?? 0);
-        $notes = trim($d->notes ?? '');
-        $archived_count = intval($d->archived_count ?? 0);
-        $compress = intval($d->compress ?? 0);
-        
-        $notes = $mysqli->real_escape_string($notes);
-        $mysqli->query("INSERT INTO archives (archive_name, db_name, created_at, created_by, notes, archived_count, is_compressed) 
-                      VALUES ('$archive_name', '$db_name', NOW(), '$admin_id', '$notes', '$archived_count', '$compress')");
-        $archive_id = $mysqli->insert_id;
-
-        // If include_clear is set, clear the specified tables
-        if ($include_clear) {
-            $tables_to_clear = [
-                'candidate_center_change_logs',
-                'lab_sessions',
-                'live_candidates',
-                'results',
-                'retest_logs',
-                'users'
-            ];
-
-            foreach ($tables_to_clear as $table) {
-                $mysqli->query("TRUNCATE TABLE $current_db.$table");
+            if ($archive_name === '') {
+                http_response_code(400);
+                echo json_encode(["status" => "fail", "message" => "Archive name is required"]);
+                exit;
             }
+
+            if (!preg_match('/^[a-zA-Z0-9_\-]+$/', $archive_name)) {
+                http_response_code(400);
+                echo json_encode(["status" => "fail", "message" => "Archive name can only contain letters, numbers, underscores, and hyphens"]);
+                exit;
+            }
+
+            global $mysqli;
+            $current_db = getenv('DB_NAME') ?: 'typing_april_12';
+            $admin_id = intval($_SESSION['admin_id'] ?? 0);
+            $notes = trim($d->notes ?? '');
+            $archived_count = intval($d->archived_count ?? 0);
+            $backup_key = 'backup_' . date('YmdHis') . '_' . archive_safe_slug($archive_name);
+            $backup_key = substr($backup_key, 0, 200);
+
+            $archive_name_esc = $mysqli->real_escape_string($archive_name);
+            $backup_key_esc = $mysqli->real_escape_string($backup_key);
+            $notes_esc = $mysqli->real_escape_string($notes);
+
+            $insert_ok = $mysqli->query("INSERT INTO archives (archive_name, db_name, created_at, created_by, notes, archived_count, status) 
+                          VALUES ('$archive_name_esc', '$backup_key_esc', NOW(), '$admin_id', '$notes_esc', '$archived_count', 'archived')");
+            if (!$insert_ok) {
+                http_response_code(500);
+                echo json_encode(["status" => "fail", "message" => "Could not save archive record: " . $mysqli->error]);
+                exit;
+            }
+
+            $archive_id = $mysqli->insert_id;
+            $archive_dir = archive_storage_root() . DIRECTORY_SEPARATOR . $backup_key;
+            if (!is_dir($archive_dir) && !mkdir($archive_dir, 0775, true)) {
+                $mysqli->query("DELETE FROM archives WHERE id='$archive_id'");
+                http_response_code(500);
+                echo json_encode(["status" => "fail", "message" => "Failed to create backup directory"]);
+                exit;
+            }
+
+            $excel_file = $archive_dir . DIRECTORY_SEPARATOR . 'results.xls';
+            $sql_zip_file = $archive_dir . DIRECTORY_SEPARATOR . 'database_backup.zip';
+
+            if (!archive_export_results_file($excel_file)) {
+                archive_delete_path($archive_dir);
+                $mysqli->query("DELETE FROM archives WHERE id='$archive_id'");
+                http_response_code(500);
+                echo json_encode(["status" => "fail", "message" => "Failed to export Excel results"]);
+                exit;
+            }
+
+            if (!archive_generate_sql_zip($current_db, $sql_zip_file)) {
+                archive_delete_path($archive_dir);
+                $mysqli->query("DELETE FROM archives WHERE id='$archive_id'");
+                http_response_code(500);
+                echo json_encode(["status" => "fail", "message" => "Failed to generate SQL backup"]);
+                exit;
+            }
+
+            if ($include_clear) {
+                $tables_to_clear = [
+                    'candidate_center_change_logs',
+                    'lab_sessions',
+                    'live_candidates',
+                    'results',
+                    'retest_logs',
+                    'users'
+                ];
+
+                foreach ($tables_to_clear as $table) {
+                    $mysqli->query("TRUNCATE TABLE `$current_db`.`$table`");
+                }
+            }
+
+            $mysqli->query("UPDATE archives SET status='ready' WHERE id='$archive_id'");
+
+            http_response_code(200);
+            echo json_encode([
+                "status" => "ok",
+                "archive_id" => $archive_id,
+                "archive_name" => $archive_name,
+                "message" => "Archive created successfully" . ($include_clear ? " and tables cleared" : "")
+            ]);
+            exit;
+        } catch (Exception $e) {
+            http_response_code(500);
+            echo json_encode(["status" => "fail", "message" => "Server error: " . $e->getMessage()]);
+            exit;
         }
 
-        echo json_encode([
-            "status" => "ok",
-            "archive_id" => $archive_id,
-            "archive_name" => $archive_name,
-            "db_name" => $db_name,
-            "message" => "Archive created successfully" . ($include_clear ? " and tables cleared" : "")
-        ]);
+    case 'download_archive_excel':
+        $archive_id = intval($_GET['archive_id'] ?? 0);
+        if ($archive_id <= 0) {
+            http_response_code(400);
+            echo "Invalid archive ID";
+            exit;
+        }
+
+        $archive_q = $mysqli->query("SELECT archive_name, db_name FROM archives WHERE id='$archive_id' LIMIT 1");
+        if (!$archive_q || $archive_q->num_rows === 0) {
+            http_response_code(404);
+            echo "Archive not found";
+            exit;
+        }
+
+        $archive = $archive_q->fetch_assoc();
+        $archive_name = $archive['archive_name'];
+        $folder = archive_locate_folder($archive);
+        $download_name = archive_safe_slug($archive_name) . '_results.xls';
+
+        if ($folder && archive_stream_file($folder . DIRECTORY_SEPARATOR . 'results.xls', $download_name, 'application/vnd.ms-excel')) {
+            exit;
+        }
+
+        $db_name = trim((string)$archive['db_name']);
+        if (preg_match('/^typing_archive_/i', $db_name)) {
+            $temp_dir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'archive_' . uniqid();
+            if (!mkdir($temp_dir)) {
+                http_response_code(500);
+                echo "Failed to create temporary directory";
+                exit;
+            }
+
+            $temp_file = $temp_dir . DIRECTORY_SEPARATOR . 'results.xls';
+            $res = $mysqli->query("SELECT r.id, r.roll_no, u.name, u.cnic, c.name as center_name, c.code as center_code, r.correct_words, r.incorrect_words, r.wpm, r.accuracy, r.time, r.date,
+                                  CASE
+                                      WHEN COALESCE(u.wpm_required, 0) > 0 AND r.wpm >= u.wpm_required THEN 'Passed'
+                                      WHEN COALESCE(u.wpm_required, 0) > 0 THEN 'Failed'
+                                      ELSE '—'
+                                  END as status
+                                  FROM {$db_name}.results r
+                                  LEFT JOIN {$db_name}.users u ON u.id=r.uid
+                                  LEFT JOIN {$db_name}.centers c ON c.id=r.center_id
+                                  ORDER BY r.date DESC");
+            $fp = fopen($temp_file, 'w');
+            fputcsv($fp, ["Result ID", "Roll No", "Candidate Name", "CNIC", "Center Code", "Center Name", "Status", "Correct Words", "Incorrect Words", "WPM", "Accuracy", "Time", "Date"], "\t");
+            if ($res) {
+                while ($row = $res->fetch_assoc()) {
+                    fputcsv($fp, [
+                        $row['id'],
+                        $row['roll_no'],
+                        $row['name'],
+                        $row['cnic'],
+                        $row['center_code'],
+                        $row['center_name'],
+                        $row['status'],
+                        $row['correct_words'],
+                        $row['incorrect_words'],
+                        $row['wpm'],
+                        $row['accuracy'],
+                        $row['time'],
+                        $row['date']
+                    ], "\t");
+                }
+            }
+            fclose($fp);
+
+            if (archive_stream_file($temp_file, $download_name, 'application/vnd.ms-excel')) {
+                @unlink($temp_file);
+                @rmdir($temp_dir);
+                exit;
+            }
+
+            @unlink($temp_file);
+            @rmdir($temp_dir);
+        }
+
+        http_response_code(404);
+        echo "Excel backup not found";
+        exit;
         break;
 
     case 'download_archive_backup':
+    case 'download_archive_sql':
         $archive_id = intval($_GET['archive_id'] ?? 0);
         if ($archive_id <= 0) {
             http_response_code(400);
@@ -1405,84 +1653,37 @@ switch ($action) {
         $archive_name = $archive['archive_name'];
         $db_name = $archive['db_name'];
 
-        // Get results for Excel export
-        $results_query = "SELECT r.id, r.roll_no, u.name, u.cnic, c.name as center_name, c.code as center_code, 
-                                r.correct_words, r.incorrect_words, r.wpm, r.accuracy, r.time, r.date,
-                                CASE
-                                    WHEN COALESCE(u.wpm_required, 0) > 0 AND r.wpm >= u.wpm_required THEN 'Passed'
-                                    WHEN COALESCE(u.wpm_required, 0) > 0 THEN 'Failed'
-                                    ELSE '—'
-                                END as status
-                         FROM {$db_name}.results r
-                         LEFT JOIN {$db_name}.users u ON u.id=r.uid
-                         LEFT JOIN {$db_name}.centers c ON c.id=r.center_id
-                         ORDER BY r.date DESC";
+        $folder = archive_locate_folder($archive);
+        $download_name = archive_safe_slug($archive_name) . '_database_backup.zip';
 
-        $res = $mysqli->query($results_query);
+        if ($folder && archive_stream_file($folder . DIRECTORY_SEPARATOR . 'database_backup.zip', $download_name, 'application/zip')) {
+            exit;
+        }
 
-        // Create temp directory
-        $temp_dir = sys_get_temp_dir() . '/archive_' . uniqid();
+        // Legacy archive support: generate a zip on demand from the replica database.
+        $temp_dir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'archive_' . uniqid();
         if (!mkdir($temp_dir)) {
             http_response_code(500);
             echo "Failed to create temporary directory";
             exit;
         }
 
-        // Export results to CSV
-        $csv_file = $temp_dir . '/results.csv';
-        $fp = fopen($csv_file, 'w');
-        fputcsv($fp, ["Result ID", "Roll No", "Candidate Name", "CNIC", "Center Code", "Center Name", "Status", "Correct Words", "Incorrect Words", "WPM", "Accuracy", "Time", "Date"]);
-        
-        if ($res) {
-            while ($row = $res->fetch_assoc()) {
-                fputcsv($fp, [
-                    $row['id'],
-                    $row['roll_no'],
-                    $row['name'],
-                    $row['cnic'],
-                    $row['center_code'],
-                    $row['center_name'],
-                    $row['status'],
-                    $row['correct_words'],
-                    $row['incorrect_words'],
-                    $row['wpm'],
-                    $row['accuracy'],
-                    $row['time'],
-                    $row['date']
-                ]);
-            }
+        $zip_file = $temp_dir . DIRECTORY_SEPARATOR . $download_name;
+        if (!archive_generate_sql_zip($db_name, $zip_file)) {
+            archive_delete_path($temp_dir);
+            http_response_code(500);
+            echo "Failed to create SQL backup";
+            exit;
         }
-        fclose($fp);
 
-        // Create SQL dump
-        $sql_file = $temp_dir . '/database_backup.sql';
-        $cmd = sprintf("mysqldump -u %s %s %s > %s", 
-            "root",
-            "",
-            $db_name,
-            $sql_file
-        );
-        shell_exec($cmd);
+        if (archive_stream_file($zip_file, $download_name, 'application/zip')) {
+            archive_delete_path($temp_dir);
+            exit;
+        }
 
-        // Create ZIP file
-        $zip_file = $temp_dir . '/' . $archive_name . '_backup.zip';
-        $zip = new ZipArchive();
-        $zip->open($zip_file, ZipArchive::CREATE);
-        $zip->addFile($csv_file, 'results.csv');
-        $zip->addFile($sql_file, 'database_backup.sql');
-        $zip->close();
-
-        // Send ZIP file to client
-        header('Content-Type: application/zip');
-        header('Content-Disposition: attachment; filename="' . $archive_name . '_backup.zip"');
-        header('Content-Length: ' . filesize($zip_file));
-        readfile($zip_file);
-
-        // Cleanup
-        unlink($csv_file);
-        unlink($sql_file);
-        unlink($zip_file);
-        rmdir($temp_dir);
+        archive_delete_path($temp_dir);
+        http_response_code(404);
+        echo "SQL backup not found";
         exit;
         break;
 
@@ -1504,8 +1705,12 @@ switch ($action) {
         $archive = $archive_q->fetch_assoc();
         $db_name = $archive['db_name'];
 
-        // Drop the database
-        $mysqli->query("DROP DATABASE IF EXISTS $db_name");
+        $folder = archive_locate_folder($archive);
+        if ($folder) {
+            archive_delete_path($folder);
+        } elseif (preg_match('/^typing_archive_/i', $db_name)) {
+            $mysqli->query("DROP DATABASE IF EXISTS $db_name");
+        }
 
         // Delete archive record
         $mysqli->query("DELETE FROM archives WHERE id='$archive_id'");
@@ -1528,25 +1733,52 @@ switch ($action) {
 
         $archive = $archive_q->fetch_assoc();
         $db_name = $archive['db_name'];
-
-        // Get top 10 results from archive database
-        $results_q = $mysqli->query("
-            SELECT r.id, r.roll_no, u.name, r.wpm,
-                   CASE
-                       WHEN COALESCE(u.wpm_required, 0) > 0 AND r.wpm >= u.wpm_required THEN 'Passed'
-                       WHEN COALESCE(u.wpm_required, 0) > 0 THEN 'Failed'
-                       ELSE '—'
-                   END as status
-            FROM $db_name.results r
-            LEFT JOIN $db_name.users u ON u.id=r.uid
-            ORDER BY r.date DESC
-            LIMIT 10
-        ");
-
         $results = [];
-        if ($results_q) {
-            while ($r = $results_q->fetch_assoc()) {
-                $results[] = $r;
+
+        $folder = archive_locate_folder($archive);
+        if ($folder) {
+            $preview_file = $folder . DIRECTORY_SEPARATOR . 'results.xls';
+            if (file_exists($preview_file)) {
+                $handle = fopen($preview_file, 'r');
+                if ($handle) {
+                    $header = fgetcsv($handle, 0, "\t");
+                    while (($row = fgetcsv($handle, 0, "\t")) !== false && count($results) < 10) {
+                        $assoc = [];
+                        if (is_array($header)) {
+                            foreach ($header as $i => $col) {
+                                $assoc[$col] = $row[$i] ?? '';
+                            }
+                        }
+                        $results[] = [
+                            'id' => $assoc['Result ID'] ?? '',
+                            'roll_no' => $assoc['Roll No'] ?? '',
+                            'name' => $assoc['Candidate Name'] ?? '',
+                            'wpm' => $assoc['WPM'] ?? '',
+                            'status' => $assoc['Status'] ?? '—',
+                        ];
+                    }
+                    fclose($handle);
+                }
+            }
+        } elseif (preg_match('/^typing_archive_/i', $db_name)) {
+            // Legacy archive support: query the replica database directly.
+            $results_q = $mysqli->query("
+                SELECT r.id, r.roll_no, u.name, r.wpm,
+                       CASE
+                           WHEN COALESCE(u.wpm_required, 0) > 0 AND r.wpm >= u.wpm_required THEN 'Passed'
+                           WHEN COALESCE(u.wpm_required, 0) > 0 THEN 'Failed'
+                           ELSE '—'
+                       END as status
+                FROM $db_name.results r
+                LEFT JOIN $db_name.users u ON u.id=r.uid
+                ORDER BY r.date DESC
+                LIMIT 10
+            ");
+
+            if ($results_q) {
+                while ($r = $results_q->fetch_assoc()) {
+                    $results[] = $r;
+                }
             }
         }
         echo json_encode($results);

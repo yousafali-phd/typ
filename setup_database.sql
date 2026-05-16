@@ -1,6 +1,6 @@
 -- ============================================================
 --  TYPING TEST SYSTEM - Complete Database Schema
---  Run this in phpMyAdmin on database: typing_local
+--  Run this in phpMyAdmin on database: typing_april_12
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS `centers` (
