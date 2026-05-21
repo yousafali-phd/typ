@@ -5,6 +5,7 @@ header("X-Frame-Options: SAMEORIGIN");
 header("Referrer-Policy: same-origin");
 require_once("../mysqli.php");
 mysqli_report(MYSQLI_REPORT_OFF);
+require_once(__DIR__ . '/../portal_gate.php');
 
 $action = $_GET['action'] ?? '';
 
@@ -16,6 +17,15 @@ if (empty($_SESSION['incharge_id']) || empty($_SESSION['incharge_center_id'])) {
 }
 
 $center_id = intval($_SESSION['incharge_center_id']);
+
+if ($action !== 'logout' && !portal_setting_enabled($mysqli, 'incharge_portal_enabled', 1)) {
+    header("Content-Type: application/json");
+    http_response_code(403);
+    session_unset();
+    session_destroy();
+    echo json_encode(["status" => "portal_disabled", "message" => "Center Incharge portal is disabled by admin."]);
+    exit;
+}
 
 if ($action !== 'export_results') {
     header("Content-Type: application/json");

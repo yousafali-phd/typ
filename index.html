@@ -1030,6 +1030,7 @@
             else if (res.status === 'notfound')     { this.errorMsg = 'CNIC or Roll Number not found in this exam center.'; }
             else if (res.status === 'already_tested')  { this.errorMsg = 'You have already completed this test.'; }
             else if (res.status === 'already_logged')  { this.errorMsg = 'You are already logged in on another device.'; }
+            else if (res.status === 'portal_disabled') { this.errorMsg = res.message || 'Candidate portal is currently disabled by admin.'; }
             else if (res.status === 'ok') {
               localStorage.setItem('_td', JSON.stringify(res.user));
               localStorage.setItem('_test_active', '1');

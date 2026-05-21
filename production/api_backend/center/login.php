@@ -6,6 +6,12 @@ header("X-Frame-Options: SAMEORIGIN");
 header("Referrer-Policy: same-origin");
 require_once("../mysqli.php");
 mysqli_report(MYSQLI_REPORT_OFF);
+require_once(__DIR__ . '/../portal_gate.php');
+
+if (!portal_setting_enabled($mysqli, 'incharge_portal_enabled', 1)) {
+    echo json_encode(["status" => "fail", "message" => "Center Incharge portal is disabled by admin."]);
+    exit;
+}
 
 $data = json_decode(file_get_contents("php://input"));
 $username = $mysqli->real_escape_string(trim($data->username ?? ''));

@@ -1,6 +1,6 @@
 # Typing Test Project Master Documentation
 
-Last Updated: 2026-05-16
+Last Updated: 2026-05-21
 Owner: Project Team
 Applies To: Entire project under C:\wamp64\www\typing
 
@@ -226,6 +226,7 @@ Output status values:
 - notfound
 - already_tested
 - already_logged
+- portal_disabled
 
 Important behavior:
 - Validates active session for current date only.
@@ -333,6 +334,8 @@ Input:
 Output:
 - status: ok/fail
 - incharge object on success
+Note:
+- Returns fail with a message when the center incharge portal is disabled in app settings.
 
 GET /typing/api_backend/center/api.php?action=dashboard
 Behavior:
@@ -586,3 +589,35 @@ Also revise impacted sections above (flow, API, DB, troubleshooting).
 - Attempted to push to GitHub repository https://github.com/yousafali-phd/typing.git.
 - HTTPS access returned "Repository not found" and SSH access returned "Permission denied (publickey)", so the push could not be completed from this machine.
 - Next action required: configure GitHub authentication or confirm the exact clone URL/owner before pushing to the remote typing branch.
+
+2026-05-21
+- Added admin-controlled portal security toggles using app_settings keys candidate_portal_enabled and incharge_portal_enabled.
+- Extended admin settings API (get_settings/update_settings) to read/write both portal flags along with default test duration.
+- Updated admin dashboard settings UI to enable/disable Candidate Portal and Center Incharge Portal.
+- Enforced candidate portal toggle in api_backend/login.php with status portal_disabled when blocked.
+- Enforced center incharge portal toggle in api_backend/center/login.php and api_backend/center/api.php (existing sessions are invalidated when disabled).
+- Updated candidate and center frontend pages to display portal-disabled messages.
+- Added default portal settings rows to setup_database.sql and update_database.sql.
+- Mirrored all runtime file changes to matching production/ files.
+
+2026-05-21
+- Hardened portal URL access by adding server-side gate files: index.php and center/index.php (plus production mirrors).
+- Gate files now return HTTP 404 when candidate_portal_enabled or incharge_portal_enabled is disabled, instead of serving portal HTML.
+- Added root and center .htaccess rules (plus production mirrors) to block direct access to index.html and force DirectoryIndex preference to index.php.
+- Result: disabled portals are not directly accessible by normal URL or direct index.html URL.
+
+2026-05-21
+- Consolidated portal access checks into a shared helper file at api_backend/portal_gate.php and mirrored it in production/api_backend/portal_gate.php.
+- Updated candidate and center portal entry points and login/API guards to use the shared helper, reducing duplication and keeping root/production behavior aligned.
+- Preserved admin access while keeping the disabled portal URLs blocked at the server level.
+
+2026-05-21
+- Hardened candidate login for high concurrency in api_backend/login.php (mirrored to production):
+   - replaced DATE(created_at)=CURDATE() with index-friendly range predicate on created_at,
+   - reduced selected columns and added LIMIT 1 to lookup queries,
+   - added query-failure guards to avoid PHP fatals and return a controlled busy response.
+- Removed per-request SHOW COLUMNS check from login path and switched to one update attempt with fallback only for legacy schema (missing last_login).
+- Added performance indexes in setup_database.sql and migration safeguards in update_database.sql:
+   - users composite login index,
+   - lab_sessions composite session lookup index,
+   - live_candidates session_id backfill and unique key user_session(user_id, session_id) required by ON DUPLICATE KEY UPDATE.

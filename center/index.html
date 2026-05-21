@@ -343,6 +343,7 @@ new Vue({
       this.$http.get(centerApi('dashboard')).then(r=>{
         const b=r.body;
         if(b.status==='unauthorized'){this.user=null;return;}
+        if(b.status==='portal_disabled'){this.user=null;this.err=b.message||'Center Incharge portal is disabled by admin.';return;}
         this.stats=b.stats||{};
         this.candidates=b.candidates||[];
         this.results=b.results||[];
@@ -363,6 +364,11 @@ new Vue({
     },
     bootSession(){
       this.$http.get(centerApi('me')).then(r=>{
+        if(r.body && r.body.status==='portal_disabled'){
+          this.user=null;
+          this.err=r.body.message || 'Center Incharge portal is disabled by admin.';
+          return;
+        }
         if(r.body && r.body.status==='ok' && r.body.user){
           this.user = r.body.user;
           this.refreshAll();

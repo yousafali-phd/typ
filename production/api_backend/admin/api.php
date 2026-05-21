@@ -88,6 +88,22 @@ function req_body() {
     return is_object($decoded) ? $decoded : null;
 }
 
+function setting_int($key, $default = 0) {
+    global $mysqli;
+    $key = $mysqli->real_escape_string(trim((string)$key));
+    if ($key === '') return intval($default);
+    $q = $mysqli->query("SELECT svalue FROM app_settings WHERE skey='$key' LIMIT 1");
+    if ($q && $q->num_rows > 0) {
+        $row = $q->fetch_assoc();
+        return intval($row['svalue']);
+    }
+    return intval($default);
+}
+
+function setting_bool($key, $default = 1) {
+    return setting_int($key, $default ? 1 : 0) === 1 ? 1 : 0;
+}
+
 function type_code_exists($code, $activeOnly = true) {
     global $mysqli;
     $code = intval($code);
@@ -224,6 +240,7 @@ function center_label_from_row($row) {
 
     $label = trim((string)row_value($row, 'center_id', ''));
     if ($label !== '') return $label;
+}
 
 function archive_storage_root() {
     $root = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'archive_backups';
@@ -380,9 +397,6 @@ function archive_locate_folder($archiveRow) {
     }
     $folder = archive_storage_root() . DIRECTORY_SEPARATOR . $backupKey;
     return is_dir($folder) ? $folder : null;
-}
-
-    return 'Unknown center';
 }
 
 function typing_root() {
@@ -769,23 +783,28 @@ switch ($action) {
     // -- SETTINGS ----------------------------------------------
     case 'get_settings':
         $minutes = 1;
-        $q = $mysqli->query("SELECT svalue FROM app_settings WHERE skey='default_test_minutes' LIMIT 1");
-        if ($q && $q->num_rows > 0) {
-            $row = $q->fetch_assoc();
-            $m = intval($row['svalue']);
-            if ($m > 0 && $m <= 30) $minutes = $m;
-        }
-        echo json_encode(["default_test_minutes" => $minutes]);
+        $m = setting_int('default_test_minutes', 1);
+        if ($m > 0 && $m <= 30) $minutes = $m;
+
+        echo json_encode([
+            "default_test_minutes" => $minutes,
+            "candidate_portal_enabled" => setting_bool('candidate_portal_enabled', 1),
+            "incharge_portal_enabled" => setting_bool('incharge_portal_enabled', 1)
+        ]);
         break;
 
     case 'update_settings':
         $d = req_body();
         $minutes = intval($d->default_test_minutes ?? 1);
+        $candidatePortalEnabled = intval($d->candidate_portal_enabled ?? 1) ? 1 : 0;
+        $inchargePortalEnabled = intval($d->incharge_portal_enabled ?? 1) ? 1 : 0;
         if ($minutes < 1 || $minutes > 30) {
             echo json_encode(["status" => "fail", "message" => "Duration must be 1-30 minutes"]);
             break;
         }
         $mysqli->query("INSERT INTO app_settings (skey, svalue) VALUES ('default_test_minutes', '$minutes') ON DUPLICATE KEY UPDATE svalue=VALUES(svalue)");
+        $mysqli->query("INSERT INTO app_settings (skey, svalue) VALUES ('candidate_portal_enabled', '$candidatePortalEnabled') ON DUPLICATE KEY UPDATE svalue=VALUES(svalue)");
+        $mysqli->query("INSERT INTO app_settings (skey, svalue) VALUES ('incharge_portal_enabled', '$inchargePortalEnabled') ON DUPLICATE KEY UPDATE svalue=VALUES(svalue)");
         echo json_encode(["status" => "ok"]);
         break;
 

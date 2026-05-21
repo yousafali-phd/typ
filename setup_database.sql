@@ -34,7 +34,9 @@ CREATE TABLE IF NOT EXISTS `app_settings` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 INSERT IGNORE INTO `app_settings` (`skey`, `svalue`) VALUES
-  ('default_test_minutes', '1');
+  ('default_test_minutes', '1'),
+  ('candidate_portal_enabled', '1'),
+  ('incharge_portal_enabled', '1');
 
 CREATE TABLE IF NOT EXISTS `type_codes` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
@@ -110,7 +112,8 @@ CREATE TABLE IF NOT EXISTS `users` (
   `last_login` datetime DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `cnic_roll` (`cnic`,`roll_no`)
+  UNIQUE KEY `cnic_roll` (`cnic`,`roll_no`),
+  KEY `idx_candidate_login` (`cnic`,`roll_no`,`center_id`,`type`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 CREATE TABLE IF NOT EXISTS `paragraphs` (
@@ -138,7 +141,8 @@ CREATE TABLE IF NOT EXISTS `lab_sessions` (
   `status` enum('active','expired') NOT NULL DEFAULT 'active',
   `created_at` datetime NOT NULL,
   PRIMARY KEY (`id`),
-  KEY `center_id` (`center_id`)
+  KEY `center_id` (`center_id`),
+  KEY `idx_session_lookup` (`session_password`,`status`,`created_at`,`center_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 CREATE TABLE IF NOT EXISTS `results` (

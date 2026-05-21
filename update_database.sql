@@ -84,6 +84,13 @@ PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
+-- Add composite index for candidate login lookup
+SET @users_idx_login_lookup_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND INDEX_NAME = 'idx_login_lookup');
+SET @sql = IF(@users_idx_login_lookup_exists = 0, 'ALTER TABLE `users` ADD INDEX `idx_login_lookup` (`cnic`, `roll_no`, `center_id`, `type`)', 'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
 -- Update existing users to have a default center (center_id = 1)
 UPDATE `users` SET `center_id` = 1 WHERE `center_id` IS NULL OR `center_id` = 0;
 
@@ -134,6 +141,13 @@ CREATE TABLE IF NOT EXISTS `lab_sessions` (
   KEY `idx_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3;
 
+-- Add composite index for active session password lookup
+SET @lab_idx_session_lookup_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'lab_sessions' AND INDEX_NAME = 'idx_session_lookup');
+SET @sql = IF(@lab_idx_session_lookup_exists = 0, 'ALTER TABLE `lab_sessions` ADD INDEX `idx_session_lookup` (`session_password`, `status`, `created_at`, `center_id`)', 'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
 -- Create live_candidates table if it doesn't exist
 CREATE TABLE IF NOT EXISTS `live_candidates` (
   `id` int NOT NULL AUTO_INCREMENT,
@@ -146,6 +160,19 @@ CREATE TABLE IF NOT EXISTS `live_candidates` (
   KEY `idx_center_id` (`center_id`),
   KEY `idx_finished` (`finished_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3;
+
+-- Ensure login upsert keys exist for live candidate tracking
+SET @live_session_id_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'live_candidates' AND COLUMN_NAME = 'session_id');
+SET @sql = IF(@live_session_id_exists = 0, 'ALTER TABLE `live_candidates` ADD COLUMN `session_id` int NOT NULL DEFAULT 0 AFTER `user_id`', 'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @live_user_session_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'live_candidates' AND INDEX_NAME = 'user_session');
+SET @sql = IF(@live_user_session_exists = 0, 'ALTER TABLE `live_candidates` ADD UNIQUE KEY `user_session` (`user_id`, `session_id`)', 'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- Update results table to include center_id if it doesn't exist
 SET @results_center_id_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'results' AND COLUMN_NAME = 'center_id');
@@ -199,7 +226,9 @@ CREATE TABLE IF NOT EXISTS `app_settings` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3;
 
 INSERT IGNORE INTO `app_settings` (`skey`, `svalue`) VALUES
-  ('default_test_minutes', '1');
+  ('default_test_minutes', '1'),
+  ('candidate_portal_enabled', '1'),
+  ('incharge_portal_enabled', '1');
 
 -- Center incharge accounts (assigned by admin)
 CREATE TABLE IF NOT EXISTS `center_incharges` (
