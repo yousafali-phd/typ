@@ -433,11 +433,16 @@
 
     /* ── LOGIN PAGE ── */
     .admin-login-wrap {
+      position: fixed;
+      inset: 0;
+      width: 100%;
       height: 100vh;
       display: flex;
       align-items: center;
       justify-content: center;
       background: linear-gradient(160deg, #1a237e 0%, #283593 50%, #1565c0 100%);
+      z-index: 9990;
+      pointer-events: auto;
     }
     .admin-login-card {
       background: #fff;
@@ -649,6 +654,8 @@
           </select>
         </div>
       </div>
+
+        
       <div class="modal-actions">
         <button class="btn btn-outline" @click="closeTypeChangeModal">Cancel</button>
         <button class="btn btn-primary" @click="submitCandidateTypeChange">Save Type</button>
@@ -657,6 +664,56 @@
   </div>
 
   <!-- ══════════ ADMIN LOGIN ══════════ -->
+    <div class="modal-overlay" v-if="portalLogModal.show" @click.self="portalLogModal.show=false">
+      <div class="modal-card" style="max-width:760px;">
+        <div class="modal-head">Portal Gate Log</div>
+        <div class="modal-body">
+          <div v-if="portalLogModal.loading" style="font-size:13px;color:var(--muted)">Loading...</div>
+          <pre v-else style="max-height:420px;overflow:auto;background:#0b1220;color:#cfe8ff;padding:12px;border-radius:6px;white-space:pre-wrap;">{{ portalLogModal.lines.join('\n') }}</pre>
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-outline" @click="portalLogModal.show=false">Close</button>
+          <button class="btn btn-primary" @click="downloadPortalGateLog">Download</button>
+        </div>
+      </div>
+    </div>
+    <div class="modal-overlay" v-if="preflightModal.show" @click.self="preflightModal.show=false">
+      <div class="modal-card" style="max-width:920px;">
+        <div class="modal-head">Preflight Check</div>
+        <div class="modal-body">
+          <div v-if="preflightModal.loading" style="font-size:13px;color:var(--muted)">Running checks...</div>
+          <div v-else>
+            <div style="margin-bottom:8px;">
+              <span class="badge badge-green">Passed {{ preflightModal.result && preflightModal.result.audit ? preflightModal.result.audit.summary.passed : '—' }}</span>
+              <span class="badge badge-orange">Warnings {{ preflightModal.result && preflightModal.result.audit ? preflightModal.result.audit.summary.warnings : '—' }}</span>
+              <span class="badge badge-red">Failed {{ preflightModal.result && preflightModal.result.audit ? preflightModal.result.audit.summary.failed : '—' }}</span>
+            </div>
+            <h4 style="margin-bottom:6px;">LB Probes</h4>
+            <div class="table-wrap" style="margin-bottom:10px;">
+              <table>
+                <thead><tr><th>URL</th><th>Status</th><th>HTTP</th><th>Latency</th><th>Message</th></tr></thead>
+                <tbody>
+                  <tr v-for="p in (preflightModal.result && preflightModal.result.lb_probes || [])" :key="p.url">
+                    <td style="word-break:break-all">{{p.url}}</td>
+                    <td><span class="badge" :class="p.ok ? 'badge-green' : 'badge-red'">{{p.ok ? 'ok' : (p.status || 'down')}}</span></td>
+                    <td>{{p.http_code || '—'}}</td>
+                    <td>{{p.latency_ms}} ms</td>
+                    <td style="word-break:break-all">{{p.message || (p.raw_body ? p.raw_body : '—')}}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h4 style="margin-bottom:6px;">DB Ping</h4>
+            <div style="margin-bottom:10px;">Status: <b>{{ preflightModal.result && preflightModal.result.db_ping && preflightModal.result.db_ping.ok ? 'ok' : 'fail' }}</b> — {{ preflightModal.result && preflightModal.result.db_ping ? preflightModal.result.db_ping.message : '' }} ({{ preflightModal.result && preflightModal.result.db_ping ? preflightModal.result.db_ping.elapsed_ms : '—' }} ms)</div>
+            <h4 style="margin-bottom:6px;">Portal Settings</h4>
+            <div style="margin-bottom:10px;">Candidate Portal: <b>{{ preflightModal.result && preflightModal.result.portal_settings && preflightModal.result.portal_settings.candidate_portal_enabled ? 'ENABLED' : 'DISABLED' }}</b> — Incharge Portal: <b>{{ preflightModal.result && preflightModal.result.portal_settings && preflightModal.result.portal_settings.incharge_portal_enabled ? 'ENABLED' : 'DISABLED' }}</b></div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-outline" @click="preflightModal.show=false">Close</button>
+        </div>
+      </div>
+    </div>
   <div class="admin-login-wrap" v-if="!admin">
     <div class="admin-login-card">
       <div class="al-logo">
@@ -681,9 +738,42 @@
       </button>
     </div>
   </div>
+  <div class="modal-overlay" v-if="syncModal.show" @click.self="syncModal.show=false">
+    <div class="modal-card" style="max-width:640px;">
+      <div class="modal-head">Sync Production — Create ZIP</div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">Base Path (example: /typing/)</label>
+          <input class="form-control" v-model="syncModal.base_path" placeholder="/typing/">
+        </div>
+        <div class="form-group">
+          <label class="form-label">DB Name</label>
+          <input class="form-control" v-model="syncModal.db_name" placeholder="production_db_name">
+        </div>
+        <div class="form-group">
+          <label class="form-label">DB User</label>
+          <input class="form-control" v-model="syncModal.db_user" placeholder="db_user">
+        </div>
+        <div class="form-group">
+          <label class="form-label">DB Password</label>
+          <input class="form-control" type="password" v-model="syncModal.db_pass" placeholder="db_password">
+        </div>
+        <div style="margin-top:8px;display:flex;align-items:center;gap:10px;">
+          <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" v-model="syncModal.zip_only"> Create ZIP only (do not overwrite server)</label>
+        </div>
+        <div v-if="syncModal.result" style="margin-top:12px;">
+          <div class="muted">Result: {{ syncModal.result.message || (syncModal.result.zip ? syncModal.result.zip : '') }}</div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" @click="syncModal.show=false">Cancel</button>
+        <button class="btn btn-primary" :disabled="syncModal.busy" @click="submitSyncProduction">Create ZIP</button>
+      </div>
+    </div>
+  </div>
 
   <!-- ══════════ MAIN APP ══════════ -->
-  <template v-else>
+  <template v-if="admin">
     <div class="sidebar-backdrop" @click="closeMobileSidebar"></div>
 
     <div class="sidebar">
@@ -699,6 +789,9 @@
         </div>
         <div class="nav-item" :class="{active: page==='analytics'}" @click="setPage('analytics', 'loadAnalytics')">
           <i class="material-icons">bar_chart</i> <span>Analytics</span>
+        </div>
+        <div class="nav-item" :class="{active: page==='system'}" @click="setPage('system', 'loadSettings')">
+          <i class="material-icons">settings</i> <span>System</span>
         </div>
       </div>
 
@@ -740,9 +833,9 @@
 
       <div class="sidebar-footer">
         <div class="admin-badge">
-          <div class="admin-avatar">{{admin.full_name ? admin.full_name[0].toUpperCase() : 'A'}}</div>
+          <div class="admin-avatar">{{admin && admin.full_name ? admin.full_name[0].toUpperCase() : 'A'}}</div>
           <div>
-            <div class="admin-name">{{admin.full_name}}</div>
+            <div class="admin-name">{{admin && admin.full_name ? admin.full_name : ''}}</div>
             <div class="admin-role">Administrator</div>
           </div>
         </div>
@@ -794,68 +887,9 @@
             </div>
           </div>
 
-          <div class="card mb-20">
-            <div class="card-header"><div class="card-title"><i class="material-icons">schedule</i> Test Duration Setting</div></div>
-            <div class="card-body" style="display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;">
-              <div class="form-group" style="max-width:240px;">
-                <label class="form-label">Default Test Time (Minutes)</label>
-                <input class="form-control" type="number" min="1" max="30" v-model.number="settingsForm.default_test_minutes">
-              </div>
-              <div class="form-group" style="min-width:220px;">
-                <label class="form-label">Candidate Portal</label>
-                <select class="form-control" v-model.number="settingsForm.candidate_portal_enabled">
-                  <option :value="1">Enabled</option>
-                  <option :value="0">Disabled</option>
-                </select>
-              </div>
-              <div class="form-group" style="min-width:220px;">
-                <label class="form-label">Center Incharge Portal</label>
-                <select class="form-control" v-model.number="settingsForm.incharge_portal_enabled">
-                  <option :value="1">Enabled</option>
-                  <option :value="0">Disabled</option>
-                </select>
-              </div>
-              <button class="btn btn-primary" @click="saveSettings"><i class="material-icons">save</i> Save</button>
-              <a href="../center/" target="_blank" class="btn btn-outline"><i class="material-icons">open_in_new</i> Open Incharge Portal</a>
-            </div>
-          </div>
-
-          <div class="card mb-20">
-            <div class="card-header">
-              <div class="card-title"><i class="material-icons">security</i> Security Check & Production Sync</div>
-              <div class="gap-12">
-                <button class="btn btn-outline btn-sm" @click="loadSecurityAudit"><i class="material-icons">shield</i> Run Check</button>
-                <button class="btn btn-primary btn-sm" :disabled="deploymentBusy" @click="syncProduction"><i class="material-icons">sync</i> Sync Production</button>
-              </div>
-            </div>
-            <div class="card-body">
-              <div class="gap-12" style="margin-bottom:12px;flex-wrap:wrap;">
-                <span class="badge badge-green">Passed {{deploymentAudit.summary.passed || 0}}</span>
-                <span class="badge badge-orange">Warnings {{deploymentAudit.summary.warnings || 0}}</span>
-                <span class="badge badge-red">Failed {{deploymentAudit.summary.failed || 0}}</span>
-                <span class="badge badge-blue" v-if="deploymentLastSync">Last sync {{deploymentLastSync}}</span>
-                <span class="badge badge-grey" v-if="deploymentBusy">Running...</span>
-              </div>
-              <div class="table-wrap">
-                <table>
-                  <thead><tr><th>Check</th><th>Status</th><th>Details</th></tr></thead>
-                  <tbody>
-                    <tr v-for="item in deploymentAudit.checks" :key="item.name">
-                      <td><b>{{item.name}}</b></td>
-                      <td><span class="badge" :class="item.status==='pass' ? 'badge-green' : item.status==='warn' ? 'badge-orange' : 'badge-red'">{{item.status}}</span></td>
-                      <td>
-                        <div>{{item.message}}</div>
-                        <div class="muted" v-if="item.meta && item.meta.length">{{Array.isArray(item.meta) ? item.meta.join(', ') : item.meta}}</div>
-                      </td>
-                    </tr>
-                    <tr v-if="deploymentAudit.checks.length===0">
-                      <td colspan="3" style="text-align:center;color:var(--muted);padding:16px">No audit run yet</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
+          <!-- System cards moved to System page -->
+          
+          <!-- Security & production sync moved to System page -->
 
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
             <!-- Quick session -->
@@ -911,6 +945,193 @@
           </div>
         </div>
 
+        <!-- ═══ SYSTEM (moved from Dashboard) ═══ -->
+        <div v-if="page==='system'">
+          <div class="card mb-20">
+            <div class="card-header"><div class="card-title"><i class="material-icons">schedule</i> App Settings</div></div>
+            <div class="card-body" style="display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;">
+              <div class="form-group" style="max-width:240px;">
+                <label class="form-label">Default Test Time (Minutes)</label>
+                <input class="form-control" type="number" min="1" max="30" v-model.number="settingsForm.default_test_minutes">
+              </div>
+              <div class="form-group" style="min-width:220px;">
+                <label class="form-label">Candidate Portal</label>
+                <select class="form-control" v-model.number="settingsForm.candidate_portal_enabled">
+                  <option :value="1">Enabled</option>
+                  <option :value="0">Disabled</option>
+                </select>
+              </div>
+              <div class="form-group" style="min-width:220px;">
+                <label class="form-label">Center Incharge Portal</label>
+                <select class="form-control" v-model.number="settingsForm.incharge_portal_enabled">
+                  <option :value="1">Enabled</option>
+                  <option :value="0">Disabled</option>
+                </select>
+              </div>
+              <button class="btn btn-primary" @click="saveSettings"><i class="material-icons">save</i> Save</button>
+              <a href="../center/" target="_blank" class="btn btn-outline"><i class="material-icons">open_in_new</i> Open Incharge Portal</a>
+            </div>
+          </div>
+
+          <div class="card mb-20">
+            <div class="card-header">
+              <div class="card-title"><i class="material-icons">cloud_upload</i> Distributed k6 Runner</div>
+              <div class="gap-12">
+                <button class="btn btn-outline btn-sm" @click="generateDistributedCommand"><i class="material-icons">play_arrow</i> Generate Command</button>
+                <button class="btn btn-primary btn-sm" :disabled="!generatedCommand" @click="copyGeneratedCommand"><i class="material-icons">content_copy</i> Copy</button>
+                <button class="btn btn-outline btn-sm" @click="downloadGeneratedScript" :disabled="!generatedCommand"><i class="material-icons">download</i> Download Script</button>
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="form-row" style="gap:12px;flex-wrap:wrap;margin-bottom:12px;">
+                <div class="form-group" style="min-width:160px;max-width:220px;">
+                  <label class="form-label">Total VUs</label>
+                  <input class="form-control" type="number" v-model.number="loadTestForm.total_vus">
+                </div>
+                <div class="form-group" style="min-width:160px;max-width:220px;">
+                  <label class="form-label">Runners</label>
+                  <input class="form-control" type="number" v-model.number="loadTestForm.runners">
+                </div>
+                <div class="form-group" style="min-width:160px;max-width:220px;">
+                  <label class="form-label">Duration</label>
+                  <input class="form-control" type="text" v-model="loadTestForm.duration" placeholder="30s">
+                </div>
+                <div class="form-group" style="flex:1;min-width:240px;">
+                  <label class="form-label">Target URL</label>
+                  <input class="form-control" type="text" v-model="loadTestForm.target_url" placeholder="https://node1.example.com/typing/api_backend/login.php">
+                </div>
+                <div class="form-group" style="min-width:160px;max-width:220px;">
+                  <label class="form-label">OTP</label>
+                  <input class="form-control" type="text" v-model="loadTestForm.otp" placeholder="session OTP">
+                </div>
+              </div>
+
+              <div class="form-group" style="margin-bottom:12px;">
+                <label class="form-label">Generated Command / Script</label>
+                <textarea class="form-control" rows="4" v-model="generatedCommand" readonly></textarea>
+                <div class="muted" style="margin-top:6px">Tip: copy this command and run it on a separate load-generator machine (not on the app server).</div>
+              </div>
+
+              <div class="form-group" style="margin-bottom:12px;">
+                <label class="form-label">Upload k6 summary JSONs (one or more)</label>
+                <input class="form-control" type="file" accept="application/json" multiple @change="handleSummaryUpload">
+                <div class="muted" style="margin-top:6px">Upload k6 `--summary-export` JSON files from each runner to aggregate results.</div>
+              </div>
+
+                  <div v-if="aggregatedSummary" style="margin-top:12px;">
+                <h4>Aggregated Summary</h4>
+                <div class="gap-12" style="flex-wrap:wrap;margin-bottom:8px;">
+                  <span class="badge badge-blue">Requests {{(aggregatedSummary.metrics && aggregatedSummary.metrics.http_reqs) ? (aggregatedSummary.metrics.http_reqs.count || 0) : 0}}</span>
+                  <span class="badge badge-green">Checks Passed {{(aggregatedSummary.metrics && aggregatedSummary.metrics.checks) ? (aggregatedSummary.metrics.checks.passed || 0) : 0}}</span>
+                  <span class="badge badge-red">Errors {{(aggregatedSummary.metrics && aggregatedSummary.metrics.http_req_failed && aggregatedSummary.metrics.http_req_failed.rate) ? (aggregatedSummary.metrics.http_req_failed.rate * 100).toFixed(2) + '%' : '0%'}} </span>
+                  <span class="badge badge-grey">p95 {{(aggregatedSummary.metrics && aggregatedSummary.metrics.http_req_duration && aggregatedSummary.metrics.http_req_duration.p95) ? (aggregatedSummary.metrics.http_req_duration.p95.toFixed(0) + ' ms') : '—'}}</span>
+                </div>
+                <pre style="background:#0b1220;color:#cfe8ff;padding:12px;border-radius:6px;">{{ aggregatedSummary.raw }}</pre>
+              </div>
+            </div>
+          </div>
+
+          <div class="card mb-20">
+            <div class="card-header">
+              <div class="card-title"><i class="material-icons">lan</i> Load Balancer Health</div>
+              <div class="gap-12">
+                <button class="btn btn-outline btn-sm" @click="applyDefaultLbEndpoints"><i class="material-icons">restart_alt</i> Default Endpoints</button>
+                <button class="btn btn-primary btn-sm" :disabled="lbHealthLoading" @click="runLbHealthCheck"><i class="material-icons">monitor_heart</i> Run Health Check</button>
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="form-group" style="margin-bottom:12px;">
+                <label class="form-label">Health Endpoints (one URL per line)</label>
+                <textarea class="form-control" rows="4" v-model="settingsForm.lb_health_endpoints" placeholder="https://node1.example.com/typing/api_backend/health.php"></textarea>
+                <div class="muted" style="margin-top:6px;">Tip: include both /health.php and /health.php?db=1 endpoints for each app node.</div>
+              </div>
+              <div class="gap-12" style="margin-bottom:12px;flex-wrap:wrap;" v-if="lbHealthSummary.total>0">
+                <span class="badge badge-blue">Total {{lbHealthSummary.total}}</span>
+                <span class="badge badge-green">Healthy {{lbHealthSummary.healthy}}</span>
+                <span class="badge badge-red">Failed {{lbHealthSummary.failed}}</span>
+                <span class="badge badge-grey" v-if="lbHealthLoading">Checking...</span>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>URL</th><th>Status</th><th>HTTP</th><th>Node</th><th>DB</th><th>Latency</th><th>Message</th></tr></thead>
+                  <tbody>
+                    <tr v-for="item in lbHealthChecks" :key="item.url">
+                      <td style="font-size:12px;word-break:break-all">{{item.url}}</td>
+                      <td><span class="badge" :class="item.ok ? 'badge-green' : 'badge-red'">{{item.ok ? 'healthy' : (item.status || 'down')}}</span></td>
+                      <td>{{item.http_code || '—'}}</td>
+                      <td>{{item.node || '—'}}</td>
+                      <td>{{item.db || '—'}}</td>
+                      <td>{{item.latency_ms}} ms</td>
+                      <td>{{item.message || '—'}}</td>
+                    </tr>
+                    <tr v-if="lbHealthChecks.length===0">
+                      <td colspan="7" style="text-align:center;color:var(--muted);padding:16px">No health check run yet</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div class="card mb-20">
+            <div class="card-header">
+              <div class="card-title"><i class="material-icons">report_problem</i> Portal Gate Log</div>
+              <div class="gap-12">
+                <label style="display:flex;align-items:center;gap:8px">
+                  <select class="form-control" v-model.number="portalLogModal.linesCount" style="min-width:120px;padding:6px 8px;font-size:13px">
+                    <option :value="100">Last 100</option>
+                    <option :value="500">Last 500</option>
+                    <option :value="2000">Last 2000</option>
+                  </select>
+                </label>
+                <button class="btn btn-outline btn-sm" :disabled="portalLogModal.loading" @click="viewPortalGateLog"><i class="material-icons">visibility</i> View</button>
+                <button class="btn btn-primary btn-sm" @click="downloadPortalGateLog"><i class="material-icons">download</i> Download</button>
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="muted">View recent access-denied entries created when portals are blocked. Useful for quick diagnostics.</div>
+            </div>
+          </div>
+
+          <div class="card mb-20">
+            <div class="card-header">
+              <div class="card-title"><i class="material-icons">security</i> Security Check & Production Sync</div>
+              <div class="gap-12">
+                <button class="btn btn-outline btn-sm" @click="loadSecurityAudit"><i class="material-icons">shield</i> Run Check</button>
+                <button class="btn btn-sm btn-outline" @click="runPreflightCheck"><i class="material-icons">play_circle</i> Preflight</button>
+                <button class="btn btn-primary btn-sm" :disabled="deploymentBusy" @click="showSyncModal"><i class="material-icons">sync</i> Sync Production</button>
+              </div>
+            </div>
+            <div class="card-body">
+                <div class="gap-12" style="margin-bottom:12px;flex-wrap:wrap;">
+                <span class="badge badge-green">Passed {{(deploymentAudit && deploymentAudit.summary) ? (deploymentAudit.summary.passed || 0) : 0}}</span>
+                <span class="badge badge-orange">Warnings {{(deploymentAudit && deploymentAudit.summary) ? (deploymentAudit.summary.warnings || 0) : 0}}</span>
+                <span class="badge badge-red">Failed {{(deploymentAudit && deploymentAudit.summary) ? (deploymentAudit.summary.failed || 0) : 0}}</span>
+                <span class="badge badge-blue" v-if="deploymentLastSync">Last sync {{deploymentLastSync}}</span>
+                <span class="badge badge-grey" v-if="deploymentBusy">Running...</span>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Check</th><th>Status</th><th>Details</th></tr></thead>
+                  <tbody>
+                    <tr v-for="item in (deploymentAudit.checks || [])" :key="item.name">
+                      <td><b>{{item.name}}</b></td>
+                      <td><span class="badge" :class="item.status==='pass' ? 'badge-green' : item.status==='warn' ? 'badge-orange' : 'badge-red'">{{item.status}}</span></td>
+                      <td>
+                        <div>{{item.message}}</div>
+                        <div class="muted" v-if="item.meta && item.meta.length">{{Array.isArray(item.meta) ? item.meta.join(', ') : item.meta}}</div>
+                      </td>
+                    </tr>
+                    <tr v-if="!(deploymentAudit && deploymentAudit.checks && deploymentAudit.checks.length)">
+                      <td colspan="3" style="text-align:center;color:var(--muted);padding:16px">No audit run yet</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- ═══ ANALYTICS ═══ -->
         <div v-if="page==='analytics'">
           <div class="stat-grid mb-20">
@@ -956,11 +1177,11 @@
                   <tbody>
                     <tr v-for="c in centerStats" :key="c.id">
                       <td><b>{{centerShortLabel(c)}}</b></td>
-                      <td>{{c.total_candidates}}</td>
-                      <td><span class="badge badge-orange">{{c.logged_in}}</span></td>
-                      <td><span class="badge badge-green">{{c.completed}}</span></td>
-                      <td><span class="badge badge-green">{{c.passed}}</span></td>
-                      <td><span class="badge badge-red">{{c.failed}}</span></td>
+                      <td>{{c.total_candidates || 0}}</td>
+                      <td><span class="badge badge-orange">{{c.logged_in || 0}}</span></td>
+                      <td><span class="badge badge-green">{{c.completed || 0}}</span></td>
+                      <td><span class="badge badge-green">{{c.passed || 0}}</span></td>
+                      <td><span class="badge badge-red">{{c.failed || 0}}</span></td>
                       <td>
                         <span :style="{color: c.avg_wpm>=45?'var(--success)':c.avg_wpm>=30?'var(--warn)':'var(--danger)', fontWeight:700}">
                           {{c.avg_wpm}}
@@ -1803,6 +2024,9 @@ new Vue({
     deploymentAudit: { ready:false, summary:{ passed:0, warnings:0, failed:0, total:0 }, checks: [] },
     deploymentBusy: false,
     deploymentLastSync: '',
+    lbHealthLoading: false,
+    lbHealthChecks: [],
+    lbHealthSummary: { total:0, healthy:0, failed:0 },
     resultCardLookup: { roll_no:'', cnic:'', center_id:0 },
     resultCard: null,
     resultCardLoading: false,
@@ -1813,7 +2037,15 @@ new Vue({
     paraForm:   { title:'', type_code:'1', type_name:'', content:'' },
     typeCodeForm: { code:'', name:'', description:'', is_active:true },
     inchargeForm: { username:'', full_name:'', password:'', center_id:'' },
-    settingsForm: { default_test_minutes: 1, candidate_portal_enabled: 1, incharge_portal_enabled: 1 },
+    settingsForm: { default_test_minutes: 1, candidate_portal_enabled: 1, incharge_portal_enabled: 1, lb_health_endpoints: '' },
+    // Load test helpers
+    loadTestForm: { total_vus: 10000, runners: 4, duration: '30s', target_url: '', otp: '' },
+    generatedCommand: '',
+    summaryFiles: [],
+    aggregatedSummary: null,
+    portalLogModal: { show: false, lines: [], loading: false, linesCount: 500 },
+    preflightModal: { show: false, loading: false, result: null },
+    syncModal: { show:false, base_path: '/typing/', db_name:'', db_user:'', db_pass:'', zip_only:true, busy:false, result:null },
     // Filters
     filterCenter: 0, resultFilter: 0,
     candidateStatusFilter: 'all',
@@ -2095,6 +2327,10 @@ new Vue({
         this.settingsForm.default_test_minutes = d.default_test_minutes || 1;
         this.settingsForm.candidate_portal_enabled = Number(d.candidate_portal_enabled) === 0 ? 0 : 1;
         this.settingsForm.incharge_portal_enabled = Number(d.incharge_portal_enabled) === 0 ? 0 : 1;
+        this.settingsForm.lb_health_endpoints = (d.lb_health_endpoints || '').trim();
+        if (!this.settingsForm.lb_health_endpoints) {
+          this.applyDefaultLbEndpoints();
+        }
       });
     },
     saveSettings() {
@@ -2102,6 +2338,202 @@ new Vue({
         if (r.status === 'ok') this.showToast('Settings updated successfully');
         else this.showToast(r.message || 'Could not update settings', 'warning');
       });
+    },
+    defaultLbEndpointText() {
+      const path = window.location.pathname || '/';
+      const marker = '/admin/';
+      const idx = path.toLowerCase().indexOf(marker);
+      const basePath = idx >= 0 ? path.slice(0, idx + 1) : '/';
+      const origin = window.location.origin || '';
+      const health = `${origin}${basePath}api_backend/health.php`;
+      const healthDb = `${origin}${basePath}api_backend/health.php?db=1`;
+      return `${health}\n${healthDb}`;
+    },
+    applyDefaultLbEndpoints() {
+      this.settingsForm.lb_health_endpoints = this.defaultLbEndpointText();
+    },
+    runLbHealthCheck() {
+      if (this.lbHealthLoading) return;
+      this.lbHealthLoading = true;
+      this.post('check_lb_health', { endpoints: this.settingsForm.lb_health_endpoints || '' }).then(r => {
+        this.lbHealthLoading = false;
+        this.lbHealthChecks = Array.isArray(r.checks) ? r.checks : [];
+        this.lbHealthSummary = r.summary || { total:0, healthy:0, failed:0 };
+        this.showToast(`Health check done: ${this.lbHealthSummary.healthy || 0}/${this.lbHealthSummary.total || 0} healthy`, 'monitor_heart');
+      }).catch(() => {
+        this.lbHealthLoading = false;
+        this.showToast('Could not run load balancer health check', 'warning');
+      });
+    },
+
+    // ── Portal Gate Log ──
+    viewPortalGateLog() {
+      // Open modal immediately so admin sees feedback even if fetch hangs
+      this.portalLogModal.show = true;
+      this.portalLogModal.lines = ['Loading...'];
+      this.portalLogModal.loading = true;
+      const url = `${API}?action=get_portal_gate_log&lines=${encodeURIComponent(this.portalLogModal.linesCount || 500)}`;
+      fetch(url, { credentials: 'same-origin' })
+        .then(resp => resp.json())
+        .then(r => {
+          if (!r || r.status !== 'ok') {
+            this.showToast(r && r.message ? r.message : 'Could not load portal gate log', 'warning');
+            this.portalLogModal.lines = [];
+          } else {
+            this.portalLogModal.lines = Array.isArray(r.lines) ? r.lines : [];
+            if (this.portalLogModal.lines.length === 0) {
+              this.portalLogModal.lines = ['(no entries found)'];
+            }
+          }
+          this.portalLogModal.loading = false;
+          this.portalLogModal.show = true;
+        }).catch(err => {
+          this.portalLogModal.loading = false;
+          this.showToast('Could not load portal gate log', 'warning');
+          this.portalLogModal.lines = ['(could not fetch log)'];
+          this.portalLogModal.show = true;
+        });
+    },
+    runPreflightCheck() {
+      if (this.preflightModal.loading) return;
+      this.preflightModal.show = true;
+      this.preflightModal.loading = true;
+      this.preflightModal.result = null;
+      this.post('preflight_check', {}).then(r => {
+        this.preflightModal.loading = false;
+        this.preflightModal.result = r;
+      }).catch(err => {
+        this.preflightModal.loading = false;
+        this.preflightModal.result = { status: 'fail', message: err && err.message ? err.message : 'Could not run preflight' };
+      });
+    },
+    showSyncModal() {
+      // Prefill base path from default endpoint
+      const defaultBase = this.defaultLbEndpointText();
+      try {
+        const lines = defaultBase.split('\n');
+        if (lines.length>0) {
+          const url = new URL(lines[0]);
+          let path = url.pathname || '/';
+          path = path.replace(/\/api_backend\/health\.php$/i, '/');
+          if (!path.endsWith('/')) path += '/';
+          this.syncModal.base_path = path;
+        }
+      } catch(e) {}
+      this.syncModal.show = true;
+      this.syncModal.result = null;
+    },
+    submitSyncProduction() {
+      if (this.syncModal.busy) return;
+      this.syncModal.busy = true;
+      const payload = {
+        base_path: this.syncModal.base_path || '',
+        db_name: this.syncModal.db_name || '',
+        db_user: this.syncModal.db_user || '',
+        db_pass: this.syncModal.db_pass || '',
+        zip_only: !!this.syncModal.zip_only,
+      };
+      this.post('sync_production', payload).then(r => {
+        this.syncModal.busy = false;
+        this.syncModal.result = r;
+        if (r && r.zip) {
+          this.showToast(`Production zip created: ${r.zip}`);
+        } else {
+          this.showToast('Production sync complete');
+        }
+      }).catch(err => {
+        this.syncModal.busy = false;
+        this.showToast('Production sync failed', 'warning');
+        this.syncModal.result = { status: 'fail', message: err && err.message ? err.message : 'Unknown' };
+      });
+    },
+    downloadPortalGateLog() {
+      // open download in new tab to trigger attachment
+      window.open(`${API}?action=download_portal_gate_log`, '_blank');
+    },
+
+    // ── Distributed k6 helpers ──
+    generateDistributedCommand() {
+      const t = this.loadTestForm;
+      if (!t.target_url) {
+        this.showToast('Please provide a target URL', 'warning');
+        return;
+      }
+      const cmd = `.\\load_tests\\run_distributed_k6.ps1 -TotalVUs ${t.total_vus} -Runners ${t.runners} -Duration '${t.duration}' -TargetUrl '${t.target_url}' -Otp '${t.otp || ''}'`;
+      const dockerNote = '# Ensure Docker is installed on the load-generator host and the repo is available at the same path.';
+      this.generatedCommand = `${dockerNote}\n${cmd}`;
+    },
+    copyGeneratedCommand() {
+      if (!this.generatedCommand) return;
+      navigator.clipboard.writeText(this.generatedCommand).then(() => this.showToast('Command copied to clipboard'));
+    },
+    downloadGeneratedScript() {
+      if (!this.generatedCommand) return;
+      const blob = new Blob([this.generatedCommand], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'run_distributed_k6.cmd.txt';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    },
+    handleSummaryUpload(e) {
+      const files = Array.from(e.target.files || []);
+      if (files.length === 0) return;
+      Promise.all(files.map(f => new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => {
+          try { res(JSON.parse(r.result)); } catch (err) { rej(err); }
+        };
+        r.onerror = () => rej(r.error);
+        r.readAsText(f);
+      }))).then(results => {
+        this.aggregateSummaries(results);
+      }).catch(() => {
+        this.showToast('Could not parse uploaded summary JSON files', 'warning');
+      });
+    },
+    aggregateSummaries(results) {
+      // results: array of k6 summary JSON objects; we'll aggregate common metrics
+      const agg = { metrics: {}, raw: JSON.stringify(results, null, 2) };
+      for (const r of results) {
+        if (!r.metrics) continue;
+        for (const [k, v] of Object.entries(r.metrics)) {
+          if (!agg.metrics[k]) agg.metrics[k] = { count:0, sum:0, rates:[], values:[] };
+          const cur = agg.metrics[k];
+          if (v.hasOwnProperty('count')) cur.count += v.count || 0;
+          if (v.hasOwnProperty('sum')) cur.sum += v.sum || 0;
+          if (v.hasOwnProperty('rate')) cur.rates.push(v.rate || 0);
+          if (v.hasOwnProperty('values') && Array.isArray(v.values)) cur.values = cur.values.concat(v.values);
+          // pass-through some commonly named subfields
+          if (v.hasOwnProperty('p(95)')) cur.p95 = Math.max(cur.p95 || 0, v['p(95)'] || 0);
+        }
+      }
+      // Massage into friendly shape
+      const friendly = { metrics: {}, raw: agg.raw };
+      // get http_reqs, http_req_failed, http_req_duration, checks
+      const pick = ['http_reqs','http_req_failed','http_req_duration','checks','checks_passed','checks_failed'];
+      for (const k of Object.keys(agg.metrics)) {
+        const m = agg.metrics[k];
+        friendly.metrics[k] = {
+          count: m.count || 0,
+          sum: m.sum || 0,
+          rate: m.rates.length ? (m.rates.reduce((a,b) => a+b,0)/m.rates.length) : undefined,
+          p95: m.p95
+        };
+      }
+      // For convenience map some expected names
+      friendly.metrics.checks = friendly.metrics.checks || { passed:0 };
+      if (agg.metrics['checks']) {
+        friendly.metrics.checks.passed = agg.metrics['checks'].count || 0;
+      }
+      // expose http_req_duration as p95 if present
+      if (agg.metrics['http_req_duration'] && agg.metrics['http_req_duration'].p95) {
+        friendly.metrics.http_req_duration = { p95: agg.metrics['http_req_duration'].p95 };
+      }
+      this.aggregatedSummary = friendly;
     },
 
     // ── TYPE CODES ──
@@ -2192,7 +2624,7 @@ new Vue({
     },
 
     // ── CENTERS ──
-    loadCenters() { this.get('get_centers').then(d => this.centers = d); },
+    loadCenters() { this.get('get_centers').then(d => { this.centers = Array.isArray(d) ? d : []; }).catch(() => { this.centers = []; }); },
     addCenter() {
       if (!this.centerForm.name || !this.centerForm.code) { this.showToast('Fill all fields', 'warning'); return; }
       this.post('add_center', this.centerForm).then(() => {
@@ -2204,7 +2636,7 @@ new Vue({
 
     // ── INCHARGES ──
     loadIncharges() {
-      this.get('get_incharges').then(d => this.incharges = d);
+      this.get('get_incharges').then(d => { this.incharges = Array.isArray(d) ? d : []; }).catch(() => { this.incharges = []; });
     },
     addIncharge() {
       if (!this.inchargeForm.username || !this.inchargeForm.full_name || !this.inchargeForm.password || !this.inchargeForm.center_id) {
@@ -2243,9 +2675,15 @@ new Vue({
     loadCandidates() {
       const q = this.filterCenter ? `&center_id=${this.filterCenter}` : '';
       this.get('get_candidates', q).then(d => {
-        this.candidates = d;
+        if (Array.isArray(d)) {
+          this.candidates = d;
+        } else if (d && Array.isArray(d.rows)) {
+          this.candidates = d.rows;
+        } else {
+          this.candidates = [];
+        }
         this.candidatePage = 1;
-      });
+      }).catch(() => { this.candidates = []; this.candidatePage = 1; });
     },
     openPendingCandidatesFromAnalytics() {
       this.page = 'candidates';
@@ -2568,7 +3006,7 @@ new Vue({
     },
 
     // ── PARAGRAPHS ──
-    loadParagraphs() { this.get('get_paragraphs').then(d => this.paragraphs = d); },
+    loadParagraphs() { this.get('get_paragraphs').then(d => { this.paragraphs = Array.isArray(d) ? d : []; }).catch(() => { this.paragraphs = []; }); },
     addParagraph() {
       if (!this.paraForm.title || !this.paraForm.content) { this.showToast('Fill all fields', 'warning'); return; }
       this.post('add_paragraph', this.paraForm).then(() => {
@@ -2620,9 +3058,13 @@ new Vue({
     // ── ANALYTICS ──
     loadAnalytics() {
       this.get('get_analytics').then(d => {
-        this.centerStats    = d.centers;
-        this.liveCandidates = d.live;
-        this.totals         = d.totals;
+        this.centerStats    = (d && d.centers) ? d.centers : [];
+        this.liveCandidates = (d && d.live) ? d.live : [];
+        this.totals         = (d && d.totals) ? d.totals : { total:0, logged:0, tested:0 };
+      }).catch(() => {
+        this.centerStats = [];
+        this.liveCandidates = [];
+        this.totals = { total:0, logged:0, tested:0 };
       });
     },
 
@@ -2630,9 +3072,9 @@ new Vue({
     loadResults() {
       const q = this.resultFilter ? `&center_id=${this.resultFilter}` : '';
       this.get('get_results', q).then(d => {
-        this.results = d;
+        this.results = Array.isArray(d) ? d : (d && Array.isArray(d.rows) ? d.rows : []);
         this.resultPage = 1;
-      });
+      }).catch(() => { this.results = []; this.resultPage = 1; });
     },
     exportResults() {
       window.open(`${API}?action=export_results`, '_blank');

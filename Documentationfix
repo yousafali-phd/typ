@@ -208,6 +208,21 @@ Note:
 ------------------------------------------------------------
 6.1 Candidate APIs
 
+GET /typing/api_backend/health.php
+Query params (optional):
+- db=1 (include DB connectivity check)
+
+Output:
+- status (ok/degraded)
+- service
+- node
+- time
+- db (when db=1)
+
+Behavior:
+- Used by load balancers for health checks.
+- Returns HTTP 503 only when db=1 and DB ping fails.
+
 GET /typing/api_backend/config.php
 Output:
 - default_test_minutes
@@ -268,6 +283,7 @@ Read-only actions:
 - me
 - audit_security
 - get_settings
+- check_lb_health (POST)
 - get_centers
 - get_type_codes
 - get_incharges
@@ -283,6 +299,7 @@ State-changing actions (POST only, return 405 on GET):
 - logout
 - sync_production
 - update_settings
+- check_lb_health
 - add_center
 - add_type_code
 - delete_type_code
@@ -621,3 +638,24 @@ Also revise impacted sections above (flow, API, DB, troubleshooting).
    - users composite login index,
    - lab_sessions composite session lookup index,
    - live_candidates session_id backfill and unique key user_session(user_id, session_id) required by ON DUPLICATE KEY UPDATE.
+
+2026-05-21
+- Added load-balancer readiness endpoint at api_backend/health.php (and production mirror).
+- Added sample load balancer configs:
+   - deployment/haproxy.cfg.example
+   - deployment/nginx-lb.conf.example
+- Config strategy:
+   - stateless candidate traffic balanced with round-robin/least-conn,
+   - session-sensitive admin/center paths routed via sticky policy (cookie/ip-hash).
+
+2026-05-21
+- Added Admin Dashboard UI section for Load Balancer Health under the settings area.
+- Added admin action check_lb_health to probe configured endpoints and show per-node status, HTTP code, node name, DB status, and latency.
+- Added app_settings key lb_health_endpoints so the admin UI can persist a custom list of node health URLs.
+
+2026-05-22
+- Added a production sync workflow in admin/api.php and admin/index.html that collects base path plus DB credentials and creates a release ZIP under production/.
+- Added production/index.php and production/.htaccess so the deploy bundle honors DirectoryIndex index.php and portal gates before serving index.html.
+- Changed disabled portal behavior to show a friendly "Exam Expired" page instead of HTTP 404 for both candidate and center incharge portals.
+- Added sync logging in deployment/sync.log to help diagnose ZIP creation and packaging issues.
+- Validation: production sync completed successfully after fixing the staged mysqli.php generation bug, and the ZIP was uploaded to the live server.

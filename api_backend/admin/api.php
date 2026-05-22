@@ -10,7 +10,8 @@ session_set_cookie_params([
     'samesite' => 'Strict',
 ]);
 session_start();
-if (($action ?? '') !== 'export_results') {
+$reqAction = $_GET['action'] ?? '';
+if (!in_array($reqAction, ['export_results', 'download_portal_gate_log'], true)) {
     header("Content-Type: application/json");
 }
 header("X-Content-Type-Options: nosniff");
@@ -49,6 +50,7 @@ $stateChangingActions = [
     'create_archive',
     'delete_archive',
     'log_archive_activity',
+    'check_lb_health',
 ];
 
 if (in_array($action, $stateChangingActions, true) && $method !== 'POST') {
@@ -102,6 +104,198 @@ function setting_int($key, $default = 0) {
 
 function setting_bool($key, $default = 1) {
     return setting_int($key, $default ? 1 : 0) === 1 ? 1 : 0;
+}
+
+function setting_text($key, $default = '') {
+    global $mysqli;
+    $key = $mysqli->real_escape_string(trim((string)$key));
+    if ($key === '') return (string)$default;
+    $q = $mysqli->query("SELECT svalue FROM app_settings WHERE skey='$key' LIMIT 1");
+    if ($q && $q->num_rows > 0) {
+        $row = $q->fetch_assoc();
+        return trim((string)($row['svalue'] ?? ''));
+    }
+    return (string)$default;
+}
+
+function lb_parse_endpoints($raw) {
+    $parts = [];
+    if (is_array($raw)) {
+        $parts = $raw;
+    } else {
+        $parts = preg_split('/[\r\n,;]+/', (string)$raw);
+    }
+
+    $seen = [];
+    $out = [];
+    foreach ($parts as $p) {
+        $url = trim((string)$p);
+        if ($url === '') continue;
+        if (!filter_var($url, FILTER_VALIDATE_URL)) continue;
+        $scheme = strtolower((string)parse_url($url, PHP_URL_SCHEME));
+        if ($scheme !== 'http' && $scheme !== 'https') continue;
+        if (isset($seen[$url])) continue;
+        $seen[$url] = true;
+        $out[] = $url;
+        if (count($out) >= 10) break;
+    }
+    return $out;
+}
+
+function lb_probe_url($url) {
+    $result = [
+        'url' => $url,
+        'ok' => false,
+        'http_code' => 0,
+        'latency_ms' => 0,
+        'status' => 'down',
+        'node' => '',
+        'service' => '',
+        'db' => '',
+        'message' => '',
+    ];
+
+    $start = microtime(true);
+    $body = '';
+    $httpCode = 0;
+
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, false);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 2);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 4);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
+        $body = curl_exec($ch);
+        if ($body === false) {
+            $result['message'] = (string)curl_error($ch);
+        }
+        $httpCode = intval(curl_getinfo($ch, CURLINFO_HTTP_CODE));
+        curl_close($ch);
+    } else {
+        $ctx = stream_context_create([
+            'http' => [
+                'method' => 'GET',
+                'timeout' => 4,
+                'ignore_errors' => true,
+                'header' => "Connection: close\r\n",
+            ]
+        ]);
+        $body = @file_get_contents($url, false, $ctx);
+        $headers = $http_response_header ?? [];
+        if (is_array($headers) && count($headers) > 0) {
+            if (preg_match('/\s(\d{3})\s/', (string)$headers[0], $m)) {
+                $httpCode = intval($m[1]);
+            }
+        }
+        if ($body === false && $result['message'] === '') {
+            $result['message'] = 'Could not fetch endpoint';
+        }
+    }
+
+    $result['http_code'] = $httpCode;
+    $result['latency_ms'] = intval(round((microtime(true) - $start) * 1000));
+
+    $payload = null;
+    if (is_string($body) && trim($body) !== '') {
+        $payload = json_decode($body, true);
+    }
+
+    if (is_array($payload)) {
+        $result['status'] = (string)($payload['status'] ?? 'unknown');
+        $result['node'] = (string)($payload['node'] ?? '');
+        $result['service'] = (string)($payload['service'] ?? '');
+        $result['db'] = (string)($payload['db'] ?? '');
+    } elseif ($result['message'] === '') {
+        $result['message'] = 'Non-JSON response';
+    }
+
+    $result['ok'] = ($httpCode === 200 && $result['status'] === 'ok');
+    if ($result['ok'] && $result['message'] === '') {
+        $result['message'] = 'Healthy';
+    }
+
+    return $result;
+}
+
+function lb_probe_url_diag($url) {
+    $result = [
+        'url' => $url,
+        'ok' => false,
+        'http_code' => 0,
+        'latency_ms' => 0,
+        'status' => 'down',
+        'node' => '',
+        'service' => '',
+        'db' => '',
+        'message' => '',
+        'raw_body' => null,
+    ];
+
+    $start = microtime(true);
+    $body = '';
+    $httpCode = 0;
+
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, false);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 8);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
+        $body = curl_exec($ch);
+        if ($body === false) {
+            $result['message'] = (string)curl_error($ch);
+        }
+        $httpCode = intval(curl_getinfo($ch, CURLINFO_HTTP_CODE));
+        curl_close($ch);
+    } else {
+        $ctx = stream_context_create([
+            'http' => [
+                'method' => 'GET',
+                'timeout' => 8,
+                'ignore_errors' => true,
+                'header' => "Connection: close\r\n",
+            ]
+        ]);
+        $body = @file_get_contents($url, false, $ctx);
+        $headers = $http_response_header ?? [];
+        if (is_array($headers) && count($headers) > 0) {
+            if (preg_match('/\s(\d{3})\s/', (string)$headers[0], $m)) {
+                $httpCode = intval($m[1]);
+            }
+        }
+        if ($body === false && $result['message'] === '') {
+            $result['message'] = 'Could not fetch endpoint';
+        }
+    }
+
+    $result['http_code'] = $httpCode;
+    $result['latency_ms'] = intval(round((microtime(true) - $start) * 1000));
+    $result['raw_body'] = is_string($body) ? (strlen($body) > 2000 ? substr($body, 0, 2000) . '...[truncated]' : $body) : null;
+
+    $payload = null;
+    if (is_string($body) && trim($body) !== '') {
+        $payload = json_decode($body, true);
+    }
+
+    if (is_array($payload)) {
+        $result['status'] = (string)($payload['status'] ?? 'unknown');
+        $result['node'] = (string)($payload['node'] ?? '');
+        $result['service'] = (string)($payload['service'] ?? '');
+        $result['db'] = (string)($payload['db'] ?? '');
+    } elseif ($result['message'] === '') {
+        $result['message'] = 'Non-JSON response';
+    }
+
+    $result['ok'] = ($httpCode === 200 && $result['status'] === 'ok');
+    if ($result['ok'] && $result['message'] === '') {
+        $result['message'] = 'Healthy';
+    }
+
+    return $result;
 }
 
 function type_code_exists($code, $activeOnly = true) {
@@ -399,6 +593,17 @@ function archive_locate_folder($archiveRow) {
     return is_dir($folder) ? $folder : null;
 }
 
+function tail_file_lines($filePath, $lines = 200) {
+    $lines = intval($lines);
+    if ($lines <= 0) $lines = 200;
+    if (!file_exists($filePath) || !is_readable($filePath)) return [];
+    $data = @file($filePath, FILE_IGNORE_NEW_LINES);
+    if ($data === false) return [];
+    $total = count($data);
+    if ($lines >= $total) return $data;
+    return array_slice($data, max(0, $total - $lines));
+}
+
 function typing_root() {
     return realpath(__DIR__ . '/../../');
 }
@@ -511,6 +716,7 @@ function sync_tree($source, $destination, &$stats) {
 function production_htaccess_template() {
     return <<<TXT
 Options -Indexes
+DirectoryIndex index.php index.html
 
 <IfModule mod_headers.c>
   Header always set X-Content-Type-Options "nosniff"
@@ -717,6 +923,8 @@ switch ($action) {
         break;
 
     case 'sync_production':
+        // Accept optional payload to customize the production bundle
+        $d = req_body();
         $audit = security_audit_report();
         if (!$audit['ready']) {
             echo json_encode([
@@ -729,16 +937,28 @@ switch ($action) {
 
         $root = typing_root();
         $production = production_root();
-        if (!$root || !$production) {
-            echo json_encode(["status" => "fail", "message" => "Could not resolve project paths"]);
+        if (!$root) {
+            echo json_encode(["status" => "fail", "message" => "Could not resolve project root"]);
             break;
         }
 
-        ensure_directory($production);
-        delete_directory_contents($production);
-        ensure_directory($production);
+        // Parameters
+        $basePath = isset($d->base_path) ? trim((string)$d->base_path) : '';
+        $dbName = isset($d->db_name) ? trim((string)$d->db_name) : '';
+        $dbUser = isset($d->db_user) ? trim((string)$d->db_user) : '';
+        $dbPass = isset($d->db_pass) ? trim((string)$d->db_pass) : '';
+        $zipOnly = isset($d->zip_only) ? (bool)$d->zip_only : true;
+
+        // Build a temporary staging folder
+        $tmp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'typing_production_build_' . time();
+        if (is_dir($tmp)) {
+            delete_directory_contents($tmp);
+            @rmdir($tmp);
+        }
+        ensure_directory($tmp);
 
         $manifest = [
+            ['source' => 'index.php', 'dest' => 'index.php'],
             ['source' => 'index.html', 'dest' => 'index.html'],
             ['source' => 'logo.png', 'dest' => 'logo.png'],
             ['source' => 'admin', 'dest' => 'admin'],
@@ -750,33 +970,86 @@ switch ($action) {
             ['source' => 'js', 'dest' => 'js'],
         ];
 
-        $stats = [
-            'copied' => [],
-            'skipped' => [],
-            'warnings' => [],
-            'errors' => [],
-        ];
-
+        $stats = [ 'copied' => [], 'skipped' => [], 'warnings' => [], 'errors' => [] ];
         foreach ($manifest as $entry) {
             $source = $root . DIRECTORY_SEPARATOR . $entry['source'];
-            $destination = $production . DIRECTORY_SEPARATOR . $entry['dest'];
+            $destination = $tmp . DIRECTORY_SEPARATOR . $entry['dest'];
             sync_tree($source, $destination, $stats);
         }
 
-        $htaccessPath = $production . DIRECTORY_SEPARATOR . '.htaccess';
-        if (@file_put_contents($htaccessPath, production_htaccess_template()) === false) {
-            $stats['errors'][] = 'Failed to write production/.htaccess';
+        // Ensure .htaccess exists in staged bundle
+        $htaccessPath = $tmp . DIRECTORY_SEPARATOR . '.htaccess';
+        @file_put_contents($htaccessPath, production_htaccess_template());
+
+        // Apply base href if provided
+        if ($basePath !== '') {
+            $idx = $tmp . DIRECTORY_SEPARATOR . 'index.html';
+            if (file_exists($idx)) {
+                $content = file_get_contents($idx);
+                if ($content !== false) {
+                    // Ensure base path is in form /typing/ or /
+                    $bp = $basePath;
+                    if ($bp !== '' && $bp[0] !== '/') $bp = '/' . $bp;
+                    if ($bp !== '' && substr($bp, -1) !== '/') $bp .= '/';
+                    // Replace existing base href or insert
+                    if (preg_match('/<base\s+href=[\'\"][^\'\"]*[\'\"]\s*\/?\>/i', $content)) {
+                        $content = preg_replace('/<base\s+href=[\'\"][^\'\"]*[\'\"]\s*\/?\>/i', '<base href="' . $bp . '">', $content, 1);
+                    } else {
+                        $content = preg_replace('/<head(.*?)>/i', '<head$1><base href="' . $bp . '">', $content, 1);
+                    }
+                    @file_put_contents($idx, $content);
+                }
+            }
         }
+
+        // Patch mysqli credentials in staged bundle if provided
+        if ($dbName !== '' || $dbUser !== '' || $dbPass !== '') {
+            $stagedMysqli = $tmp . DIRECTORY_SEPARATOR . 'api_backend' . DIRECTORY_SEPARATOR . 'mysqli.php';
+            $dbHost = 'localhost';
+            $content = "<?php\n// Production DB credentials inserted by sync tool\n";
+            $content .= "\$dbHost = '" . addslashes($dbHost) . "';\n";
+            $content .= "\$dbUser = '" . addslashes($dbUser) . "';\n";
+            $content .= "\$dbPass = '" . addslashes($dbPass) . "';\n";
+            $content .= "\$dbName = '" . addslashes($dbName) . "';\n\n";
+            $content .= "\$mysqli = new mysqli(\$dbHost, \$dbUser, \$dbPass, \$dbName);\n\n";
+            $content .= "if (\$mysqli->connect_error) {\n    die(json_encode(array('error' => 'Connection failed: ' . \$mysqli->connect_error)));\n}\n";
+            $content .= "\$mysqli->set_charset('utf8');\n";
+            @file_put_contents($stagedMysqli, $content);
+        }
+
+        // Create zip in production folder
+        $prodFolder = $production ?: ($root . DIRECTORY_SEPARATOR . 'production');
+        ensure_directory($prodFolder);
+        $zipName = 'production_release_' . date('YmdHis') . '.zip';
+        $zipPath = $prodFolder . DIRECTORY_SEPARATOR . $zipName;
+
+        $zip = new ZipArchive();
+        if ($zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+            @file_put_contents(typing_root() . DIRECTORY_SEPARATOR . 'deployment' . DIRECTORY_SEPARATOR . 'sync.log', date('c') . " - Could not create zip archive at $zipPath\n", FILE_APPEND);
+            echo json_encode([ 'status' => 'fail', 'message' => 'Could not create zip archive' ]);
+            break;
+        }
+
+        $files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($tmp, RecursiveDirectoryIterator::SKIP_DOTS));
+        foreach ($files as $file) {
+            $filePath = $file->getPathname();
+            $localPath = substr($filePath, strlen($tmp) + 1);
+            $zip->addFile($filePath, str_replace('\\', '/', $localPath));
+        }
+        $zip->close();
+        @file_put_contents(typing_root() . DIRECTORY_SEPARATOR . 'deployment' . DIRECTORY_SEPARATOR . 'sync.log', date('c') . " - ZIP created: $zipPath\n", FILE_APPEND);
+
+        // Cleanup staged folder
+        delete_directory_contents($tmp);
+        @rmdir($tmp);
 
         $auditAfter = security_audit_report();
         echo json_encode([
-            "status" => count($stats['errors']) === 0 ? "ok" : "fail",
-            "copied" => count($stats['copied']),
-            "skipped" => count($stats['skipped']),
-            "warnings" => $stats['warnings'],
-            "errors" => $stats['errors'],
-            "audit" => $auditAfter,
-            "synced_at" => date('c'),
+            'status' => 'ok',
+            'zip' => basename($zipPath),
+            'zip_path' => $zipPath,
+            'audit' => $auditAfter,
+            'synced_at' => date('c'),
         ]);
         break;
 
@@ -789,7 +1062,8 @@ switch ($action) {
         echo json_encode([
             "default_test_minutes" => $minutes,
             "candidate_portal_enabled" => setting_bool('candidate_portal_enabled', 1),
-            "incharge_portal_enabled" => setting_bool('incharge_portal_enabled', 1)
+            "incharge_portal_enabled" => setting_bool('incharge_portal_enabled', 1),
+            "lb_health_endpoints" => setting_text('lb_health_endpoints', '')
         ]);
         break;
 
@@ -798,6 +1072,10 @@ switch ($action) {
         $minutes = intval($d->default_test_minutes ?? 1);
         $candidatePortalEnabled = intval($d->candidate_portal_enabled ?? 1) ? 1 : 0;
         $inchargePortalEnabled = intval($d->incharge_portal_enabled ?? 1) ? 1 : 0;
+        $lbHealthEndpoints = implode("\n", lb_parse_endpoints((string)($d->lb_health_endpoints ?? '')));
+        if (strlen($lbHealthEndpoints) > 240) {
+            $lbHealthEndpoints = substr($lbHealthEndpoints, 0, 240);
+        }
         if ($minutes < 1 || $minutes > 30) {
             echo json_encode(["status" => "fail", "message" => "Duration must be 1-30 minutes"]);
             break;
@@ -805,7 +1083,134 @@ switch ($action) {
         $mysqli->query("INSERT INTO app_settings (skey, svalue) VALUES ('default_test_minutes', '$minutes') ON DUPLICATE KEY UPDATE svalue=VALUES(svalue)");
         $mysqli->query("INSERT INTO app_settings (skey, svalue) VALUES ('candidate_portal_enabled', '$candidatePortalEnabled') ON DUPLICATE KEY UPDATE svalue=VALUES(svalue)");
         $mysqli->query("INSERT INTO app_settings (skey, svalue) VALUES ('incharge_portal_enabled', '$inchargePortalEnabled') ON DUPLICATE KEY UPDATE svalue=VALUES(svalue)");
+        $lbEsc = $mysqli->real_escape_string($lbHealthEndpoints);
+        $mysqli->query("INSERT INTO app_settings (skey, svalue) VALUES ('lb_health_endpoints', '$lbEsc') ON DUPLICATE KEY UPDATE svalue=VALUES(svalue)");
         echo json_encode(["status" => "ok"]);
+        break;
+
+    case 'check_lb_health':
+        $d = req_body();
+        $saved = setting_text('lb_health_endpoints', '');
+        $endpoints = lb_parse_endpoints($d->endpoints ?? $saved);
+        if (count($endpoints) === 0) {
+            $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+            $host = trim((string)($_SERVER['HTTP_HOST'] ?? 'localhost'));
+            $root = dirname(dirname(dirname((string)($_SERVER['SCRIPT_NAME'] ?? '/typing/api_backend/admin/api.php'))));
+            $root = rtrim(str_replace('\\', '/', $root), '/');
+            if ($root === '') $root = '/typing';
+            $endpoints = [
+                $scheme . '://' . $host . $root . '/api_backend/health.php',
+                $scheme . '://' . $host . $root . '/api_backend/health.php?db=1',
+            ];
+        }
+
+        $checks = [];
+        $ok = 0;
+        $fail = 0;
+        foreach ($endpoints as $ep) {
+            $probe = lb_probe_url($ep);
+            $checks[] = $probe;
+            if (!empty($probe['ok'])) $ok++; else $fail++;
+        }
+
+        echo json_encode([
+            'status' => 'ok',
+            'summary' => [
+                'total' => count($checks),
+                'healthy' => $ok,
+                'failed' => $fail,
+            ],
+            'checks' => $checks,
+        ]);
+        break;
+
+        case 'preflight_check':
+            // Run combined preflight checks for admins before exam start
+            $out = [];
+
+            // security audit
+            $out['audit'] = security_audit_report();
+
+            // LB health (use saved endpoints)
+            $saved = setting_text('lb_health_endpoints', '');
+            $endpoints = lb_parse_endpoints($saved);
+            if (count($endpoints) === 0) {
+                $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+                $host = trim((string)($_SERVER['HTTP_HOST'] ?? 'localhost'));
+                $root = dirname(dirname(dirname((string)($_SERVER['SCRIPT_NAME'] ?? '/typing/api_backend/admin/api.php'))));
+                $root = rtrim(str_replace('\\', '/', $root), '/');
+                if ($root === '') $root = '/typing';
+                $endpoints = [
+                    $scheme . '://' . $host . $root . '/api_backend/health.php',
+                    $scheme . '://' . $host . $root . '/api_backend/health.php?db=1',
+                ];
+            }
+            $probes = [];
+            foreach ($endpoints as $ep) {
+                $probes[] = lb_probe_url_diag($ep);
+            }
+            $out['lb_probes'] = $probes;
+
+            // Local DB ping and mysqli info
+            $dbPing = ['ok' => false, 'message' => '', 'elapsed_ms' => 0];
+            $dt = microtime(true);
+            if (method_exists($GLOBALS['mysqli'], 'ping')) {
+                $ok = false;
+                try {
+                    $ok = $GLOBALS['mysqli']->ping();
+                } catch (Exception $e) {
+                    $dbPing['message'] = $e->getMessage();
+                }
+                $dbPing['ok'] = $ok ? true : false;
+            } else {
+                $dbPing['message'] = 'mysqli->ping() not available';
+            }
+            $dbPing['elapsed_ms'] = intval(round((microtime(true) - $dt) * 1000));
+            $out['db_ping'] = $dbPing;
+
+            // Portal settings
+            $out['portal_settings'] = [
+                'candidate_portal_enabled' => setting_bool('candidate_portal_enabled', 1),
+                'incharge_portal_enabled' => setting_bool('incharge_portal_enabled', 1),
+            ];
+
+            // Portal gate log accessibility
+            $logFile = __DIR__ . '/../portal_gate_denied.log';
+            $out['portal_log'] = [
+                'exists' => file_exists($logFile),
+                'readable' => is_readable($logFile),
+                'size' => file_exists($logFile) ? filesize($logFile) : 0,
+            ];
+
+            // quick check for production index.php presence
+            $prod = production_root();
+            $out['production'] = [
+                'index_php_exists' => ($prod && file_exists($prod . DIRECTORY_SEPARATOR . 'index.php')),
+                'htaccess_exists' => ($prod && file_exists($prod . DIRECTORY_SEPARATOR . '.htaccess')),
+            ];
+
+            echo json_encode(array_merge(['status' => 'ok'], $out));
+            break;
+
+    case 'get_portal_gate_log':
+        $lines = intval($_GET['lines'] ?? 200);
+        $file = __DIR__ . '/../portal_gate_denied.log';
+        $tail = tail_file_lines($file, $lines);
+        echo json_encode(['status' => 'ok', 'lines' => $tail, 'count' => count($tail)]);
+        break;
+
+    case 'download_portal_gate_log':
+        $file = __DIR__ . '/../portal_gate_denied.log';
+        if (!file_exists($file) || !is_readable($file)) {
+            http_response_code(404);
+            echo json_encode(['status' => 'fail', 'message' => 'Log not found']);
+            break;
+        }
+        // Stream as plain text attachment
+        header('Content-Type: text/plain');
+        header('Content-Disposition: attachment; filename="portal_gate_denied.log"');
+        header('Content-Length: ' . filesize($file));
+        readfile($file);
         break;
 
     // -- CENTERS ----------------------------------------------

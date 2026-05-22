@@ -113,6 +113,15 @@ Open `center/` to view only center-assigned candidates, sessions, and results.
 - Use the `production/` copies as the deployable bundle.
 - Confirm the database schema matches the current PHP API expectations before pushing live.
 
+### Production deployment
+
+- Ensure your webserver prefers `index.php` over `index.html` so PHP wrappers run (Apache: `DirectoryIndex index.php index.html`).
+- The app uses PHP wrapper files (`index.php`) to enforce portal feature flags (`app_settings`). If `index.html` is served directly, disabling portals from Admin will not take effect.
+- Gate denials are logged to `api_backend/portal_gate_denied.log` (created automatically when a portal is blocked). Check this file on production for quick diagnostics when a portal is disabled.
+- Disabled candidate and center incharge portals now show a friendly `Exam Expired` page instead of an HTTP 404 error.
+- The Admin dashboard includes a Sync Production tool that packages the deployable bundle into `production/production_release_YYYYmmddHHMMSS.zip` after collecting the base path and database credentials.
+- The production bundle includes `production/index.php` and `production/.htaccess` so the gate runs before `index.html` is served.
+
 ## Support
 
 If login, session, or result issues appear, start with the diagnostic pages above and check the API/backend connection in `api_backend/mysqli.php`.
